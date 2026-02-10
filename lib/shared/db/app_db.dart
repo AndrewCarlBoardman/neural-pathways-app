@@ -109,6 +109,24 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
+  Future<Step?> getStepById(int stepId) {
+    return (select(steps)..where((t) => t.id.equals(stepId))).getSingleOrNull();
+  }
+
+  Future<void> updateStep({
+    required int stepId,
+    required String instructionText,
+    String? photoPath,
+  }) async {
+    await (update(steps)..where((t) => t.id.equals(stepId))).write(
+      StepsCompanion(
+        instructionText: Value(instructionText),
+        photoPath: Value(photoPath),
+      ),
+    );
+  }
+
+
   // --- Highlights (1 per Step) ---
   Stream<StepHighlight?> watchHighlightForStep(int stepId) {
     return (select(stepHighlights)..where((t) => t.stepId.equals(stepId)))
@@ -148,6 +166,17 @@ class AppDatabase extends _$AppDatabase {
   Future<void> deleteHighlightForStep(int stepId) async {
     await (delete(stepHighlights)..where((t) => t.stepId.equals(stepId))).go();
   }
+
+  Future<void> deleteStep(int stepId) async {
+    await transaction(() async {
+      // 1 highlight per step (your schema), so delete it first
+      await (delete(stepHighlights)..where((t) => t.stepId.equals(stepId))).go();
+
+      // Then delete the step itself
+      await (delete(steps)..where((t) => t.id.equals(stepId))).go();
+    });
+  }
+
 }
 
 LazyDatabase _openConnection() {

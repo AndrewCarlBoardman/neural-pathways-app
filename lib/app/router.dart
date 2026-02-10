@@ -43,6 +43,20 @@ final routerProvider = Provider<GoRouter>((ref) {
                       return step_create.StepCreateScreen(guideId: guideId);
                     },
                   ),
+
+                  // ✅ NEW: edit existing step
+                  GoRoute(
+                    path: 'steps/:stepId/edit',
+                    builder: (context, state) {
+                      final guideId = int.parse(state.pathParameters['guideId']!);
+                      final stepId = int.parse(state.pathParameters['stepId']!);
+                      return step_create.StepCreateScreen(
+                        guideId: guideId,
+                        stepId: stepId,
+                      );
+                    },
+                  ),
+
                   GoRoute(
                     path: 'play',
                     builder: (context, state) {
