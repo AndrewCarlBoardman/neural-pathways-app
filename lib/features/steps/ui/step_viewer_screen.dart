@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart' hide Step;
@@ -7,15 +8,90 @@ import '../../../shared/db/app_db.dart';
 import '../../../shared/db/db_provider.dart';
 import '../../highlights/highlight_overlay.dart';
 
-final stepsForViewerProvider = StreamProvider.family<List<Step>, int>((ref, guideId) {
+const int _slot2SortOrderBase = 1000;
+const double _frameAspectRatio = 1.0;
+
+final stepsForViewerProvider =
+StreamProvider.family<List<Step>, int>((ref, guideId) {
   final db = ref.watch(dbProvider);
   return db.watchStepsForGuide(guideId);
 });
 
-final highlightForStepProvider = StreamProvider.family<StepHighlight?, int>((ref, stepId) {
+final annotationsForStepProvider =
+StreamProvider.family<List<StepAnnotation>, int>((ref, stepId) {
   final db = ref.watch(dbProvider);
-  return db.watchHighlightForStep(stepId);
+  return db.watchAnnotationsForStep(stepId);
 });
+
+/// Same encoding used by StepCreateScreen.
+class _StepImagesPayload {
+  final _StepImageRef? a;
+  final _StepImageRef? b;
+
+  const _StepImagesPayload({required this.a, required this.b});
+
+  bool get hasTwo => b != null;
+
+  static _StepImagesPayload fromPhotoPath(String? raw) {
+    if (raw == null || raw.trim().isEmpty) {
+      return const _StepImagesPayload(a: null, b: null);
+    }
+
+    final s = raw.trim();
+
+    if (!s.startsWith('{') && s.contains('||')) {
+      final parts = s.split('||');
+      final a = parts.isNotEmpty && parts[0].trim().isNotEmpty
+          ? _StepImageRef(path: parts[0].trim())
+          : null;
+      final b = parts.length >= 2 && parts[1].trim().isNotEmpty
+          ? _StepImageRef(path: parts[1].trim())
+          : null;
+      return _StepImagesPayload(a: a, b: b);
+    }
+
+    if (!s.startsWith('{')) {
+      return _StepImagesPayload(a: _StepImageRef(path: s), b: null);
+    }
+
+    try {
+      final map = jsonDecode(s) as Map<String, dynamic>;
+      final aMap = map['a'] as Map<String, dynamic>?;
+      final bMap = map['b'] as Map<String, dynamic>?;
+      return _StepImagesPayload(
+        a: aMap == null ? null : _StepImageRef.fromJson(aMap),
+        b: bMap == null ? null : _StepImageRef.fromJson(bMap),
+      );
+    } catch (_) {
+      return _StepImagesPayload(a: _StepImageRef(path: s), b: null);
+    }
+  }
+}
+
+class _StepImageRef {
+  final String path;
+  final double scale;
+  final double tx;
+  final double ty;
+
+  const _StepImageRef({
+    required this.path,
+    this.scale = 1.0,
+    this.tx = 0.0,
+    this.ty = 0.0,
+  });
+
+  File get file => File(path);
+
+  static _StepImageRef fromJson(Map<String, dynamic> json) {
+    return _StepImageRef(
+      path: (json['p'] as String?) ?? '',
+      scale: (json['s'] as num?)?.toDouble() ?? 1.0,
+      tx: (json['x'] as num?)?.toDouble() ?? 0.0,
+      ty: (json['y'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+}
 
 class StepViewerScreen extends ConsumerStatefulWidget {
   final int guideId;
@@ -36,6 +112,19 @@ class _StepViewerScreenState extends ConsumerState<StepViewerScreen> {
     if (index > 0) setState(() => index--);
   }
 
+  List<StepAnnotation> _annsForSlot(List<StepAnnotation> all, int slot) {
+    if (slot == 1) {
+      final filtered =
+      all.where((a) => a.sortOrder < _slot2SortOrderBase).toList();
+      filtered.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+      return filtered;
+    }
+    final filtered =
+    all.where((a) => a.sortOrder >= _slot2SortOrderBase).toList();
+    filtered.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    return filtered;
+  }
+
   @override
   Widget build(BuildContext context) {
     final stepsAsync = ref.watch(stepsForViewerProvider(widget.guideId));
@@ -48,7 +137,9 @@ class _StepViewerScreenState extends ConsumerState<StepViewerScreen> {
 
           if (index >= steps.length) index = steps.length - 1;
           final step = steps[index];
-          final highlightAsync = ref.watch(highlightForStepProvider(step.id));
+
+          final annAsync = ref.watch(annotationsForStepProvider(step.id));
+          final payload = _StepImagesPayload.fromPhotoPath(step.photoPath);
 
           return Column(
             children: [
@@ -58,42 +149,43 @@ class _StepViewerScreenState extends ConsumerState<StepViewerScreen> {
                   children: [
                     Text(
                       'Step ${step.stepIndex} of ${steps.length}',
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 12),
-
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: (step.photoPath != null && step.photoPath!.isNotEmpty)
-                          ? highlightAsync.when(
-                        data: (h) => _StepPhotoWithHighlight(
-                          photoPath: step.photoPath!,
-                          highlight: h,
-                        ),
-                        loading: () => _StepPhotoWithHighlight(
-                          photoPath: step.photoPath!,
-                          highlight: null,
-                        ),
-                        error: (_, __) => _StepPhotoWithHighlight(
-                          photoPath: step.photoPath!,
-                          highlight: null,
-                        ),
-                      )
-                          : Container(
-                        height: 240,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(),
-                        ),
-                        child: const Text('No image'),
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
-
+                    const SizedBox(height: 12),
+                    annAsync.when(
+                      data: (all) {
+                        final a1 = _annsForSlot(all, 1);
+                        final a2 = _annsForSlot(all, 2);
+                        return _StepImagesViewer(
+                          img1: payload.a,
+                          img2: payload.b,
+                          anns1: a1,
+                          anns2: a2,
+                        );
+                      },
+                      loading: () => _StepImagesViewer(
+                        img1: payload.a,
+                        img2: payload.b,
+                        anns1: const [],
+                        anns2: const [],
+                      ),
+                      error: (_, __) => _StepImagesViewer(
+                        img1: payload.a,
+                        img2: payload.b,
+                        anns1: const [],
+                        anns2: const [],
+                      ),
+                    ),
                     const SizedBox(height: 18),
                     Text(
                       step.instructionText,
-                      style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
+                      style: const TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ],
                 ),
@@ -115,7 +207,9 @@ class _StepViewerScreenState extends ConsumerState<StepViewerScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: FilledButton(
-                          onPressed: index == steps.length - 1 ? null : () => _next(steps),
+                          onPressed: index == steps.length - 1
+                              ? null
+                              : () => _next(steps),
                           child: const Padding(
                             padding: EdgeInsets.symmetric(vertical: 16),
                             child: Text('Next', style: TextStyle(fontSize: 18)),
@@ -136,88 +230,139 @@ class _StepViewerScreenState extends ConsumerState<StepViewerScreen> {
   }
 }
 
-/// Displays the FULL image (no crop) using AspectRatio so the highlight overlay
-/// lines up perfectly with the saved 0..1 coordinates.
-class _StepPhotoWithHighlight extends StatefulWidget {
-  final String photoPath;
-  final StepHighlight? highlight;
+class _StepImagesViewer extends StatelessWidget {
+  final _StepImageRef? img1;
+  final _StepImageRef? img2;
+  final List<StepAnnotation> anns1;
+  final List<StepAnnotation> anns2;
 
-  const _StepPhotoWithHighlight({
-    required this.photoPath,
-    required this.highlight,
+  const _StepImagesViewer({
+    required this.img1,
+    required this.img2,
+    required this.anns1,
+    required this.anns2,
   });
 
   @override
-  State<_StepPhotoWithHighlight> createState() => _StepPhotoWithHighlightState();
+  Widget build(BuildContext context) {
+    final has1 = img1 != null && img1!.path.trim().isNotEmpty;
+    final has2 = img2 != null && img2!.path.trim().isNotEmpty;
+
+    if (!has1 && !has2) {
+      return ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: AspectRatio(
+            aspectRatio: _frameAspectRatio,
+            child: Container(
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Theme.of(context).colorScheme.outline),
+              ),
+              child: const Text('No image'),
+            ),
+          ),
+      );
+      }
+
+          if (!has2) {
+        return _FramedImageWithOverlay(img: img1!, annotations: anns1);
+      }
+
+      return Row(
+        children: [
+          Expanded(child: _FramedImageWithOverlay(img: img1, annotations: anns1)),
+          const SizedBox(width: 12),
+          Expanded(child: _FramedImageWithOverlay(img: img2, annotations: anns2)),
+        ],
+      );
+    }
 }
 
-class _StepPhotoWithHighlightState extends State<_StepPhotoWithHighlight> {
-  double? _aspect;
+class _FramedImageWithOverlay extends StatelessWidget {
+  final _StepImageRef? img;
+  final List<StepAnnotation> annotations;
 
-  @override
-  void initState() {
-    super.initState();
-    _resolveAspect();
-  }
-
-  @override
-  void didUpdateWidget(covariant _StepPhotoWithHighlight oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.photoPath != widget.photoPath) {
-      _aspect = null;
-      _resolveAspect();
-    }
-  }
-
-  void _resolveAspect() {
-    final provider = FileImage(File(widget.photoPath));
-    final stream = provider.resolve(const ImageConfiguration());
-    late final ImageStreamListener listener;
-
-    listener = ImageStreamListener((info, _) {
-      if (!mounted) return;
-      setState(() {
-        _aspect = info.image.width / info.image.height;
-      });
-      stream.removeListener(listener);
-    }, onError: (e, st) {
-      stream.removeListener(listener);
-      if (!mounted) return;
-      // Fallback so the UI doesn't get stuck if the image fails to decode.
-      setState(() => _aspect = 16 / 9);
-    });
-
-    stream.addListener(listener);
-  }
+  const _FramedImageWithOverlay({required this.img, required this.annotations});
 
   @override
   Widget build(BuildContext context) {
-    final aspect = _aspect;
-    if (aspect == null) {
-      return const SizedBox(
-        height: 240,
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    return SizedBox(
-      height: 240,
-      child: Center(
-        child: AspectRatio(
-          aspectRatio: aspect,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Image.file(
-                File(widget.photoPath),
-                fit: BoxFit.fill, // IMPORTANT: no crop, matches overlay coords
+    if (img == null || img!.path.trim().isEmpty) {
+      return ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: AspectRatio(
+            aspectRatio: _frameAspectRatio,
+            child: Container(
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Theme.of(context).colorScheme.outline),
               ),
-              if (widget.highlight != null)
-                HighlightOverlay(highlight: widget.highlight!),
-            ],
+              child: const Text('No image'),
+            ),
           ),
-        ),
-      ),
+      );
+          }
+
+          return ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+    child: AspectRatio(
+    aspectRatio: _frameAspectRatio,
+    child: Container(
+    decoration: BoxDecoration(
+    borderRadius: BorderRadius.circular(16),
+    border: Border.all(color: Theme.of(context).colorScheme.outline),
+    ),
+    child: Stack(
+    fit: StackFit.expand,
+    children: [
+    _TransformedImageFill(
+    file: img!.file,
+    scale: img!.scale,
+    tx: img!.tx,
+    ty: img!.ty,
+    ),
+    if (annotations.isNotEmpty) HighlightOverlay(annotations: annotations),
+    ],
+    ),
+    ),
+    ),
+    );
+  }
+}
+
+class _TransformedImageFill extends StatelessWidget {
+  final File file;
+  final double scale;
+  final double tx;
+  final double ty;
+
+  const _TransformedImageFill({
+    required this.file,
+    required this.scale,
+    required this.tx,
+    required this.ty,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final m = Matrix4.identity()
+          ..translate(tx * constraints.maxWidth, ty * constraints.maxHeight)
+          ..scale(scale, scale);
+        return ClipRect(
+          child: Transform(
+            transform: m,
+            child: Image.file(
+              file,
+              fit: BoxFit.cover,
+              width: constraints.maxWidth,
+              height: constraints.maxHeight,
+            ),
+          ),
+        );
+      },
     );
   }
 }

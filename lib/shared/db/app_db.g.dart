@@ -1028,12 +1028,25 @@ class StepsCompanion extends UpdateCompanion<Step> {
   }
 }
 
-class $StepHighlightsTable extends StepHighlights
-    with TableInfo<$StepHighlightsTable, StepHighlight> {
+class $StepAnnotationsTable extends StepAnnotations
+    with TableInfo<$StepAnnotationsTable, StepAnnotation> {
   @override
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
-  $StepHighlightsTable(this.attachedDatabase, [this._alias]);
+  $StepAnnotationsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
   static const VerificationMeta _stepIdMeta = const VerificationMeta('stepId');
   @override
   late final GeneratedColumn<int> stepId = GeneratedColumn<int>(
@@ -1041,15 +1054,36 @@ class $StepHighlightsTable extends StepHighlights
     aliasedName,
     false,
     type: DriftSqlType.int,
-    requiredDuringInsert: false,
+    requiredDuringInsert: true,
     defaultConstraints: GeneratedColumn.constraintIsAlways(
       'REFERENCES steps (id)',
     ),
   );
-  static const VerificationMeta _shapeMeta = const VerificationMeta('shape');
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
   @override
-  late final GeneratedColumn<int> shape = GeneratedColumn<int>(
-    'shape',
+  late final GeneratedColumn<int> kind = GeneratedColumn<int>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _shapeTypeMeta = const VerificationMeta(
+    'shapeType',
+  );
+  @override
+  late final GeneratedColumn<int> shapeType = GeneratedColumn<int>(
+    'shape_type',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _colorMeta = const VerificationMeta('color');
+  @override
+  late final GeneratedColumn<int> color = GeneratedColumn<int>(
+    'color',
     aliasedName,
     false,
     type: DriftSqlType.int,
@@ -1092,6 +1126,27 @@ class $StepHighlightsTable extends StepHighlights
     type: DriftSqlType.double,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _labelMeta = const VerificationMeta('label');
+  @override
+  late final GeneratedColumn<String> label = GeneratedColumn<String>(
+    'label',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _sortOrderMeta = const VerificationMeta(
+    'sortOrder',
+  );
+  @override
+  late final GeneratedColumn<int> sortOrder = GeneratedColumn<int>(
+    'sort_order',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   static const VerificationMeta _updatedAtMeta = const VerificationMeta(
     'updatedAt',
   );
@@ -1105,29 +1160,59 @@ class $StepHighlightsTable extends StepHighlights
     defaultValue: currentDateAndTime,
   );
   @override
-  List<GeneratedColumn> get $columns => [stepId, shape, x, y, w, h, updatedAt];
+  List<GeneratedColumn> get $columns => [
+    id,
+    stepId,
+    kind,
+    shapeType,
+    color,
+    x,
+    y,
+    w,
+    h,
+    label,
+    sortOrder,
+    updatedAt,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
   String get actualTableName => $name;
-  static const String $name = 'step_highlights';
+  static const String $name = 'step_annotations';
   @override
   VerificationContext validateIntegrity(
-    Insertable<StepHighlight> instance, {
+    Insertable<StepAnnotation> instance, {
     bool isInserting = false,
   }) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
     if (data.containsKey('step_id')) {
       context.handle(
         _stepIdMeta,
         stepId.isAcceptableOrUnknown(data['step_id']!, _stepIdMeta),
       );
+    } else if (isInserting) {
+      context.missing(_stepIdMeta);
     }
-    if (data.containsKey('shape')) {
+    if (data.containsKey('kind')) {
       context.handle(
-        _shapeMeta,
-        shape.isAcceptableOrUnknown(data['shape']!, _shapeMeta),
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    }
+    if (data.containsKey('shape_type')) {
+      context.handle(
+        _shapeTypeMeta,
+        shapeType.isAcceptableOrUnknown(data['shape_type']!, _shapeTypeMeta),
+      );
+    }
+    if (data.containsKey('color')) {
+      context.handle(
+        _colorMeta,
+        color.isAcceptableOrUnknown(data['color']!, _colorMeta),
       );
     }
     if (data.containsKey('x')) {
@@ -1150,6 +1235,18 @@ class $StepHighlightsTable extends StepHighlights
     } else if (isInserting) {
       context.missing(_hMeta);
     }
+    if (data.containsKey('label')) {
+      context.handle(
+        _labelMeta,
+        label.isAcceptableOrUnknown(data['label']!, _labelMeta),
+      );
+    }
+    if (data.containsKey('sort_order')) {
+      context.handle(
+        _sortOrderMeta,
+        sortOrder.isAcceptableOrUnknown(data['sort_order']!, _sortOrderMeta),
+      );
+    }
     if (data.containsKey('updated_at')) {
       context.handle(
         _updatedAtMeta,
@@ -1160,18 +1257,30 @@ class $StepHighlightsTable extends StepHighlights
   }
 
   @override
-  Set<GeneratedColumn> get $primaryKey => {stepId};
+  Set<GeneratedColumn> get $primaryKey => {id};
   @override
-  StepHighlight map(Map<String, dynamic> data, {String? tablePrefix}) {
+  StepAnnotation map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return StepHighlight(
+    return StepAnnotation(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
       stepId: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}step_id'],
       )!,
-      shape: attachedDatabase.typeMapping.read(
+      kind: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
-        data['${effectivePrefix}shape'],
+        data['${effectivePrefix}kind'],
+      )!,
+      shapeType: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}shape_type'],
+      ),
+      color: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}color'],
       )!,
       x: attachedDatabase.typeMapping.read(
         DriftSqlType.double,
@@ -1189,6 +1298,14 @@ class $StepHighlightsTable extends StepHighlights
         DriftSqlType.double,
         data['${effectivePrefix}h'],
       )!,
+      label: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}label'],
+      ),
+      sortOrder: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sort_order'],
+      )!,
       updatedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
@@ -1197,65 +1314,111 @@ class $StepHighlightsTable extends StepHighlights
   }
 
   @override
-  $StepHighlightsTable createAlias(String alias) {
-    return $StepHighlightsTable(attachedDatabase, alias);
+  $StepAnnotationsTable createAlias(String alias) {
+    return $StepAnnotationsTable(attachedDatabase, alias);
   }
 }
 
-class StepHighlight extends DataClass implements Insertable<StepHighlight> {
+class StepAnnotation extends DataClass implements Insertable<StepAnnotation> {
+  final int id;
   final int stepId;
-  final int shape;
+
+  /// 0 = shape, 1 = text
+  final int kind;
+
+  /// For kind=shape:
+  /// 0 = rect, 1 = circle
+  final int? shapeType;
+
+  /// 0 = yellow, 1 = red, 2 = blue
+  final int color;
+
+  /// Relative coords 0..1 (same idea as before)
   final double x;
   final double y;
   final double w;
   final double h;
+
+  /// For kind=text (renamed from `text` -> `label` to avoid drift analyzer crash)
+  final String? label;
+
+  /// Optional: simple ordering if needed later
+  final int sortOrder;
   final DateTime updatedAt;
-  const StepHighlight({
+  const StepAnnotation({
+    required this.id,
     required this.stepId,
-    required this.shape,
+    required this.kind,
+    this.shapeType,
+    required this.color,
     required this.x,
     required this.y,
     required this.w,
     required this.h,
+    this.label,
+    required this.sortOrder,
     required this.updatedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
     map['step_id'] = Variable<int>(stepId);
-    map['shape'] = Variable<int>(shape);
+    map['kind'] = Variable<int>(kind);
+    if (!nullToAbsent || shapeType != null) {
+      map['shape_type'] = Variable<int>(shapeType);
+    }
+    map['color'] = Variable<int>(color);
     map['x'] = Variable<double>(x);
     map['y'] = Variable<double>(y);
     map['w'] = Variable<double>(w);
     map['h'] = Variable<double>(h);
+    if (!nullToAbsent || label != null) {
+      map['label'] = Variable<String>(label);
+    }
+    map['sort_order'] = Variable<int>(sortOrder);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
   }
 
-  StepHighlightsCompanion toCompanion(bool nullToAbsent) {
-    return StepHighlightsCompanion(
+  StepAnnotationsCompanion toCompanion(bool nullToAbsent) {
+    return StepAnnotationsCompanion(
+      id: Value(id),
       stepId: Value(stepId),
-      shape: Value(shape),
+      kind: Value(kind),
+      shapeType: shapeType == null && nullToAbsent
+          ? const Value.absent()
+          : Value(shapeType),
+      color: Value(color),
       x: Value(x),
       y: Value(y),
       w: Value(w),
       h: Value(h),
+      label: label == null && nullToAbsent
+          ? const Value.absent()
+          : Value(label),
+      sortOrder: Value(sortOrder),
       updatedAt: Value(updatedAt),
     );
   }
 
-  factory StepHighlight.fromJson(
+  factory StepAnnotation.fromJson(
     Map<String, dynamic> json, {
     ValueSerializer? serializer,
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
-    return StepHighlight(
+    return StepAnnotation(
+      id: serializer.fromJson<int>(json['id']),
       stepId: serializer.fromJson<int>(json['stepId']),
-      shape: serializer.fromJson<int>(json['shape']),
+      kind: serializer.fromJson<int>(json['kind']),
+      shapeType: serializer.fromJson<int?>(json['shapeType']),
+      color: serializer.fromJson<int>(json['color']),
       x: serializer.fromJson<double>(json['x']),
       y: serializer.fromJson<double>(json['y']),
       w: serializer.fromJson<double>(json['w']),
       h: serializer.fromJson<double>(json['h']),
+      label: serializer.fromJson<String?>(json['label']),
+      sortOrder: serializer.fromJson<int>(json['sortOrder']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
   }
@@ -1263,139 +1426,218 @@ class StepHighlight extends DataClass implements Insertable<StepHighlight> {
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
       'stepId': serializer.toJson<int>(stepId),
-      'shape': serializer.toJson<int>(shape),
+      'kind': serializer.toJson<int>(kind),
+      'shapeType': serializer.toJson<int?>(shapeType),
+      'color': serializer.toJson<int>(color),
       'x': serializer.toJson<double>(x),
       'y': serializer.toJson<double>(y),
       'w': serializer.toJson<double>(w),
       'h': serializer.toJson<double>(h),
+      'label': serializer.toJson<String?>(label),
+      'sortOrder': serializer.toJson<int>(sortOrder),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
   }
 
-  StepHighlight copyWith({
+  StepAnnotation copyWith({
+    int? id,
     int? stepId,
-    int? shape,
+    int? kind,
+    Value<int?> shapeType = const Value.absent(),
+    int? color,
     double? x,
     double? y,
     double? w,
     double? h,
+    Value<String?> label = const Value.absent(),
+    int? sortOrder,
     DateTime? updatedAt,
-  }) => StepHighlight(
+  }) => StepAnnotation(
+    id: id ?? this.id,
     stepId: stepId ?? this.stepId,
-    shape: shape ?? this.shape,
+    kind: kind ?? this.kind,
+    shapeType: shapeType.present ? shapeType.value : this.shapeType,
+    color: color ?? this.color,
     x: x ?? this.x,
     y: y ?? this.y,
     w: w ?? this.w,
     h: h ?? this.h,
+    label: label.present ? label.value : this.label,
+    sortOrder: sortOrder ?? this.sortOrder,
     updatedAt: updatedAt ?? this.updatedAt,
   );
-  StepHighlight copyWithCompanion(StepHighlightsCompanion data) {
-    return StepHighlight(
+  StepAnnotation copyWithCompanion(StepAnnotationsCompanion data) {
+    return StepAnnotation(
+      id: data.id.present ? data.id.value : this.id,
       stepId: data.stepId.present ? data.stepId.value : this.stepId,
-      shape: data.shape.present ? data.shape.value : this.shape,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      shapeType: data.shapeType.present ? data.shapeType.value : this.shapeType,
+      color: data.color.present ? data.color.value : this.color,
       x: data.x.present ? data.x.value : this.x,
       y: data.y.present ? data.y.value : this.y,
       w: data.w.present ? data.w.value : this.w,
       h: data.h.present ? data.h.value : this.h,
+      label: data.label.present ? data.label.value : this.label,
+      sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
   @override
   String toString() {
-    return (StringBuffer('StepHighlight(')
+    return (StringBuffer('StepAnnotation(')
+          ..write('id: $id, ')
           ..write('stepId: $stepId, ')
-          ..write('shape: $shape, ')
+          ..write('kind: $kind, ')
+          ..write('shapeType: $shapeType, ')
+          ..write('color: $color, ')
           ..write('x: $x, ')
           ..write('y: $y, ')
           ..write('w: $w, ')
           ..write('h: $h, ')
+          ..write('label: $label, ')
+          ..write('sortOrder: $sortOrder, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(stepId, shape, x, y, w, h, updatedAt);
+  int get hashCode => Object.hash(
+    id,
+    stepId,
+    kind,
+    shapeType,
+    color,
+    x,
+    y,
+    w,
+    h,
+    label,
+    sortOrder,
+    updatedAt,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is StepHighlight &&
+      (other is StepAnnotation &&
+          other.id == this.id &&
           other.stepId == this.stepId &&
-          other.shape == this.shape &&
+          other.kind == this.kind &&
+          other.shapeType == this.shapeType &&
+          other.color == this.color &&
           other.x == this.x &&
           other.y == this.y &&
           other.w == this.w &&
           other.h == this.h &&
+          other.label == this.label &&
+          other.sortOrder == this.sortOrder &&
           other.updatedAt == this.updatedAt);
 }
 
-class StepHighlightsCompanion extends UpdateCompanion<StepHighlight> {
+class StepAnnotationsCompanion extends UpdateCompanion<StepAnnotation> {
+  final Value<int> id;
   final Value<int> stepId;
-  final Value<int> shape;
+  final Value<int> kind;
+  final Value<int?> shapeType;
+  final Value<int> color;
   final Value<double> x;
   final Value<double> y;
   final Value<double> w;
   final Value<double> h;
+  final Value<String?> label;
+  final Value<int> sortOrder;
   final Value<DateTime> updatedAt;
-  const StepHighlightsCompanion({
+  const StepAnnotationsCompanion({
+    this.id = const Value.absent(),
     this.stepId = const Value.absent(),
-    this.shape = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.shapeType = const Value.absent(),
+    this.color = const Value.absent(),
     this.x = const Value.absent(),
     this.y = const Value.absent(),
     this.w = const Value.absent(),
     this.h = const Value.absent(),
+    this.label = const Value.absent(),
+    this.sortOrder = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
-  StepHighlightsCompanion.insert({
-    this.stepId = const Value.absent(),
-    this.shape = const Value.absent(),
+  StepAnnotationsCompanion.insert({
+    this.id = const Value.absent(),
+    required int stepId,
+    this.kind = const Value.absent(),
+    this.shapeType = const Value.absent(),
+    this.color = const Value.absent(),
     required double x,
     required double y,
     required double w,
     required double h,
+    this.label = const Value.absent(),
+    this.sortOrder = const Value.absent(),
     this.updatedAt = const Value.absent(),
-  }) : x = Value(x),
+  }) : stepId = Value(stepId),
+       x = Value(x),
        y = Value(y),
        w = Value(w),
        h = Value(h);
-  static Insertable<StepHighlight> custom({
+  static Insertable<StepAnnotation> custom({
+    Expression<int>? id,
     Expression<int>? stepId,
-    Expression<int>? shape,
+    Expression<int>? kind,
+    Expression<int>? shapeType,
+    Expression<int>? color,
     Expression<double>? x,
     Expression<double>? y,
     Expression<double>? w,
     Expression<double>? h,
+    Expression<String>? label,
+    Expression<int>? sortOrder,
     Expression<DateTime>? updatedAt,
   }) {
     return RawValuesInsertable({
+      if (id != null) 'id': id,
       if (stepId != null) 'step_id': stepId,
-      if (shape != null) 'shape': shape,
+      if (kind != null) 'kind': kind,
+      if (shapeType != null) 'shape_type': shapeType,
+      if (color != null) 'color': color,
       if (x != null) 'x': x,
       if (y != null) 'y': y,
       if (w != null) 'w': w,
       if (h != null) 'h': h,
+      if (label != null) 'label': label,
+      if (sortOrder != null) 'sort_order': sortOrder,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
   }
 
-  StepHighlightsCompanion copyWith({
+  StepAnnotationsCompanion copyWith({
+    Value<int>? id,
     Value<int>? stepId,
-    Value<int>? shape,
+    Value<int>? kind,
+    Value<int?>? shapeType,
+    Value<int>? color,
     Value<double>? x,
     Value<double>? y,
     Value<double>? w,
     Value<double>? h,
+    Value<String?>? label,
+    Value<int>? sortOrder,
     Value<DateTime>? updatedAt,
   }) {
-    return StepHighlightsCompanion(
+    return StepAnnotationsCompanion(
+      id: id ?? this.id,
       stepId: stepId ?? this.stepId,
-      shape: shape ?? this.shape,
+      kind: kind ?? this.kind,
+      shapeType: shapeType ?? this.shapeType,
+      color: color ?? this.color,
       x: x ?? this.x,
       y: y ?? this.y,
       w: w ?? this.w,
       h: h ?? this.h,
+      label: label ?? this.label,
+      sortOrder: sortOrder ?? this.sortOrder,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
@@ -1403,11 +1645,20 @@ class StepHighlightsCompanion extends UpdateCompanion<StepHighlight> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
     if (stepId.present) {
       map['step_id'] = Variable<int>(stepId.value);
     }
-    if (shape.present) {
-      map['shape'] = Variable<int>(shape.value);
+    if (kind.present) {
+      map['kind'] = Variable<int>(kind.value);
+    }
+    if (shapeType.present) {
+      map['shape_type'] = Variable<int>(shapeType.value);
+    }
+    if (color.present) {
+      map['color'] = Variable<int>(color.value);
     }
     if (x.present) {
       map['x'] = Variable<double>(x.value);
@@ -1421,6 +1672,12 @@ class StepHighlightsCompanion extends UpdateCompanion<StepHighlight> {
     if (h.present) {
       map['h'] = Variable<double>(h.value);
     }
+    if (label.present) {
+      map['label'] = Variable<String>(label.value);
+    }
+    if (sortOrder.present) {
+      map['sort_order'] = Variable<int>(sortOrder.value);
+    }
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
@@ -1429,13 +1686,18 @@ class StepHighlightsCompanion extends UpdateCompanion<StepHighlight> {
 
   @override
   String toString() {
-    return (StringBuffer('StepHighlightsCompanion(')
+    return (StringBuffer('StepAnnotationsCompanion(')
+          ..write('id: $id, ')
           ..write('stepId: $stepId, ')
-          ..write('shape: $shape, ')
+          ..write('kind: $kind, ')
+          ..write('shapeType: $shapeType, ')
+          ..write('color: $color, ')
           ..write('x: $x, ')
           ..write('y: $y, ')
           ..write('w: $w, ')
           ..write('h: $h, ')
+          ..write('label: $label, ')
+          ..write('sortOrder: $sortOrder, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
@@ -1448,7 +1710,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $DevicesTable devices = $DevicesTable(this);
   late final $GuidesTable guides = $GuidesTable(this);
   late final $StepsTable steps = $StepsTable(this);
-  late final $StepHighlightsTable stepHighlights = $StepHighlightsTable(this);
+  late final $StepAnnotationsTable stepAnnotations = $StepAnnotationsTable(
+    this,
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1457,7 +1721,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     devices,
     guides,
     steps,
-    stepHighlights,
+    stepAnnotations,
   ];
 }
 
@@ -2145,19 +2409,21 @@ final class $$StepsTableReferences
     );
   }
 
-  static MultiTypedResultKey<$StepHighlightsTable, List<StepHighlight>>
-  _stepHighlightsRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
-    db.stepHighlights,
-    aliasName: $_aliasNameGenerator(db.steps.id, db.stepHighlights.stepId),
+  static MultiTypedResultKey<$StepAnnotationsTable, List<StepAnnotation>>
+  _stepAnnotationsRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.stepAnnotations,
+    aliasName: $_aliasNameGenerator(db.steps.id, db.stepAnnotations.stepId),
   );
 
-  $$StepHighlightsTableProcessedTableManager get stepHighlightsRefs {
-    final manager = $$StepHighlightsTableTableManager(
+  $$StepAnnotationsTableProcessedTableManager get stepAnnotationsRefs {
+    final manager = $$StepAnnotationsTableTableManager(
       $_db,
-      $_db.stepHighlights,
+      $_db.stepAnnotations,
     ).filter((f) => f.stepId.id.sqlEquals($_itemColumn<int>('id')!));
 
-    final cache = $_typedResult.readTableOrNull(_stepHighlightsRefsTable($_db));
+    final cache = $_typedResult.readTableOrNull(
+      _stepAnnotationsRefsTable($_db),
+    );
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
     );
@@ -2220,22 +2486,22 @@ class $$StepsTableFilterComposer extends Composer<_$AppDatabase, $StepsTable> {
     return composer;
   }
 
-  Expression<bool> stepHighlightsRefs(
-    Expression<bool> Function($$StepHighlightsTableFilterComposer f) f,
+  Expression<bool> stepAnnotationsRefs(
+    Expression<bool> Function($$StepAnnotationsTableFilterComposer f) f,
   ) {
-    final $$StepHighlightsTableFilterComposer composer = $composerBuilder(
+    final $$StepAnnotationsTableFilterComposer composer = $composerBuilder(
       composer: this,
       getCurrentColumn: (t) => t.id,
-      referencedTable: $db.stepHighlights,
+      referencedTable: $db.stepAnnotations,
       getReferencedColumn: (t) => t.stepId,
       builder:
           (
             joinBuilder, {
             $addJoinBuilderToRootComposer,
             $removeJoinBuilderFromRootComposer,
-          }) => $$StepHighlightsTableFilterComposer(
+          }) => $$StepAnnotationsTableFilterComposer(
             $db: $db,
-            $table: $db.stepHighlights,
+            $table: $db.stepAnnotations,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -2353,22 +2619,22 @@ class $$StepsTableAnnotationComposer
     return composer;
   }
 
-  Expression<T> stepHighlightsRefs<T extends Object>(
-    Expression<T> Function($$StepHighlightsTableAnnotationComposer a) f,
+  Expression<T> stepAnnotationsRefs<T extends Object>(
+    Expression<T> Function($$StepAnnotationsTableAnnotationComposer a) f,
   ) {
-    final $$StepHighlightsTableAnnotationComposer composer = $composerBuilder(
+    final $$StepAnnotationsTableAnnotationComposer composer = $composerBuilder(
       composer: this,
       getCurrentColumn: (t) => t.id,
-      referencedTable: $db.stepHighlights,
+      referencedTable: $db.stepAnnotations,
       getReferencedColumn: (t) => t.stepId,
       builder:
           (
             joinBuilder, {
             $addJoinBuilderToRootComposer,
             $removeJoinBuilderFromRootComposer,
-          }) => $$StepHighlightsTableAnnotationComposer(
+          }) => $$StepAnnotationsTableAnnotationComposer(
             $db: $db,
-            $table: $db.stepHighlights,
+            $table: $db.stepAnnotations,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -2392,7 +2658,7 @@ class $$StepsTableTableManager
           $$StepsTableUpdateCompanionBuilder,
           (Step, $$StepsTableReferences),
           Step,
-          PrefetchHooks Function({bool guideId, bool stepHighlightsRefs})
+          PrefetchHooks Function({bool guideId, bool stepAnnotationsRefs})
         > {
   $$StepsTableTableManager(_$AppDatabase db, $StepsTable table)
     : super(
@@ -2444,11 +2710,11 @@ class $$StepsTableTableManager
               )
               .toList(),
           prefetchHooksCallback:
-              ({guideId = false, stepHighlightsRefs = false}) {
+              ({guideId = false, stepAnnotationsRefs = false}) {
                 return PrefetchHooks(
                   db: db,
                   explicitlyWatchedTables: [
-                    if (stepHighlightsRefs) db.stepHighlights,
+                    if (stepAnnotationsRefs) db.stepAnnotations,
                   ],
                   addJoins:
                       <
@@ -2484,21 +2750,21 @@ class $$StepsTableTableManager
                       },
                   getPrefetchedDataCallback: (items) async {
                     return [
-                      if (stepHighlightsRefs)
+                      if (stepAnnotationsRefs)
                         await $_getPrefetchedData<
                           Step,
                           $StepsTable,
-                          StepHighlight
+                          StepAnnotation
                         >(
                           currentTable: table,
                           referencedTable: $$StepsTableReferences
-                              ._stepHighlightsRefsTable(db),
+                              ._stepAnnotationsRefsTable(db),
                           managerFromTypedResult: (p0) =>
                               $$StepsTableReferences(
                                 db,
                                 table,
                                 p0,
-                              ).stepHighlightsRefs,
+                              ).stepAnnotationsRefs,
                           referencedItemsForCurrentItem:
                               (item, referencedItems) => referencedItems.where(
                                 (e) => e.stepId == item.id,
@@ -2525,39 +2791,50 @@ typedef $$StepsTableProcessedTableManager =
       $$StepsTableUpdateCompanionBuilder,
       (Step, $$StepsTableReferences),
       Step,
-      PrefetchHooks Function({bool guideId, bool stepHighlightsRefs})
+      PrefetchHooks Function({bool guideId, bool stepAnnotationsRefs})
     >;
-typedef $$StepHighlightsTableCreateCompanionBuilder =
-    StepHighlightsCompanion Function({
-      Value<int> stepId,
-      Value<int> shape,
+typedef $$StepAnnotationsTableCreateCompanionBuilder =
+    StepAnnotationsCompanion Function({
+      Value<int> id,
+      required int stepId,
+      Value<int> kind,
+      Value<int?> shapeType,
+      Value<int> color,
       required double x,
       required double y,
       required double w,
       required double h,
+      Value<String?> label,
+      Value<int> sortOrder,
       Value<DateTime> updatedAt,
     });
-typedef $$StepHighlightsTableUpdateCompanionBuilder =
-    StepHighlightsCompanion Function({
+typedef $$StepAnnotationsTableUpdateCompanionBuilder =
+    StepAnnotationsCompanion Function({
+      Value<int> id,
       Value<int> stepId,
-      Value<int> shape,
+      Value<int> kind,
+      Value<int?> shapeType,
+      Value<int> color,
       Value<double> x,
       Value<double> y,
       Value<double> w,
       Value<double> h,
+      Value<String?> label,
+      Value<int> sortOrder,
       Value<DateTime> updatedAt,
     });
 
-final class $$StepHighlightsTableReferences
-    extends BaseReferences<_$AppDatabase, $StepHighlightsTable, StepHighlight> {
-  $$StepHighlightsTableReferences(
+final class $$StepAnnotationsTableReferences
+    extends
+        BaseReferences<_$AppDatabase, $StepAnnotationsTable, StepAnnotation> {
+  $$StepAnnotationsTableReferences(
     super.$_db,
     super.$_table,
     super.$_typedResult,
   );
 
   static $StepsTable _stepIdTable(_$AppDatabase db) => db.steps.createAlias(
-    $_aliasNameGenerator(db.stepHighlights.stepId, db.steps.id),
+    $_aliasNameGenerator(db.stepAnnotations.stepId, db.steps.id),
   );
 
   $$StepsTableProcessedTableManager get stepId {
@@ -2575,17 +2852,32 @@ final class $$StepHighlightsTableReferences
   }
 }
 
-class $$StepHighlightsTableFilterComposer
-    extends Composer<_$AppDatabase, $StepHighlightsTable> {
-  $$StepHighlightsTableFilterComposer({
+class $$StepAnnotationsTableFilterComposer
+    extends Composer<_$AppDatabase, $StepAnnotationsTable> {
+  $$StepAnnotationsTableFilterComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
-  ColumnFilters<int> get shape => $composableBuilder(
-    column: $table.shape,
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get shapeType => $composableBuilder(
+    column: $table.shapeType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get color => $composableBuilder(
+    column: $table.color,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2606,6 +2898,16 @@ class $$StepHighlightsTableFilterComposer
 
   ColumnFilters<double> get h => $composableBuilder(
     column: $table.h,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get label => $composableBuilder(
+    column: $table.label,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sortOrder => $composableBuilder(
+    column: $table.sortOrder,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2638,17 +2940,32 @@ class $$StepHighlightsTableFilterComposer
   }
 }
 
-class $$StepHighlightsTableOrderingComposer
-    extends Composer<_$AppDatabase, $StepHighlightsTable> {
-  $$StepHighlightsTableOrderingComposer({
+class $$StepAnnotationsTableOrderingComposer
+    extends Composer<_$AppDatabase, $StepAnnotationsTable> {
+  $$StepAnnotationsTableOrderingComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
-  ColumnOrderings<int> get shape => $composableBuilder(
-    column: $table.shape,
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get shapeType => $composableBuilder(
+    column: $table.shapeType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get color => $composableBuilder(
+    column: $table.color,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -2669,6 +2986,16 @@ class $$StepHighlightsTableOrderingComposer
 
   ColumnOrderings<double> get h => $composableBuilder(
     column: $table.h,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get label => $composableBuilder(
+    column: $table.label,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sortOrder => $composableBuilder(
+    column: $table.sortOrder,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -2701,17 +3028,26 @@ class $$StepHighlightsTableOrderingComposer
   }
 }
 
-class $$StepHighlightsTableAnnotationComposer
-    extends Composer<_$AppDatabase, $StepHighlightsTable> {
-  $$StepHighlightsTableAnnotationComposer({
+class $$StepAnnotationsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $StepAnnotationsTable> {
+  $$StepAnnotationsTableAnnotationComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
-  GeneratedColumn<int> get shape =>
-      $composableBuilder(column: $table.shape, builder: (column) => column);
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<int> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<int> get shapeType =>
+      $composableBuilder(column: $table.shapeType, builder: (column) => column);
+
+  GeneratedColumn<int> get color =>
+      $composableBuilder(column: $table.color, builder: (column) => column);
 
   GeneratedColumn<double> get x =>
       $composableBuilder(column: $table.x, builder: (column) => column);
@@ -2724,6 +3060,12 @@ class $$StepHighlightsTableAnnotationComposer
 
   GeneratedColumn<double> get h =>
       $composableBuilder(column: $table.h, builder: (column) => column);
+
+  GeneratedColumn<String> get label =>
+      $composableBuilder(column: $table.label, builder: (column) => column);
+
+  GeneratedColumn<int> get sortOrder =>
+      $composableBuilder(column: $table.sortOrder, builder: (column) => column);
 
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
@@ -2752,75 +3094,95 @@ class $$StepHighlightsTableAnnotationComposer
   }
 }
 
-class $$StepHighlightsTableTableManager
+class $$StepAnnotationsTableTableManager
     extends
         RootTableManager<
           _$AppDatabase,
-          $StepHighlightsTable,
-          StepHighlight,
-          $$StepHighlightsTableFilterComposer,
-          $$StepHighlightsTableOrderingComposer,
-          $$StepHighlightsTableAnnotationComposer,
-          $$StepHighlightsTableCreateCompanionBuilder,
-          $$StepHighlightsTableUpdateCompanionBuilder,
-          (StepHighlight, $$StepHighlightsTableReferences),
-          StepHighlight,
+          $StepAnnotationsTable,
+          StepAnnotation,
+          $$StepAnnotationsTableFilterComposer,
+          $$StepAnnotationsTableOrderingComposer,
+          $$StepAnnotationsTableAnnotationComposer,
+          $$StepAnnotationsTableCreateCompanionBuilder,
+          $$StepAnnotationsTableUpdateCompanionBuilder,
+          (StepAnnotation, $$StepAnnotationsTableReferences),
+          StepAnnotation,
           PrefetchHooks Function({bool stepId})
         > {
-  $$StepHighlightsTableTableManager(
+  $$StepAnnotationsTableTableManager(
     _$AppDatabase db,
-    $StepHighlightsTable table,
+    $StepAnnotationsTable table,
   ) : super(
         TableManagerState(
           db: db,
           table: table,
           createFilteringComposer: () =>
-              $$StepHighlightsTableFilterComposer($db: db, $table: table),
+              $$StepAnnotationsTableFilterComposer($db: db, $table: table),
           createOrderingComposer: () =>
-              $$StepHighlightsTableOrderingComposer($db: db, $table: table),
+              $$StepAnnotationsTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
-              $$StepHighlightsTableAnnotationComposer($db: db, $table: table),
+              $$StepAnnotationsTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
+                Value<int> id = const Value.absent(),
                 Value<int> stepId = const Value.absent(),
-                Value<int> shape = const Value.absent(),
+                Value<int> kind = const Value.absent(),
+                Value<int?> shapeType = const Value.absent(),
+                Value<int> color = const Value.absent(),
                 Value<double> x = const Value.absent(),
                 Value<double> y = const Value.absent(),
                 Value<double> w = const Value.absent(),
                 Value<double> h = const Value.absent(),
+                Value<String?> label = const Value.absent(),
+                Value<int> sortOrder = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
-              }) => StepHighlightsCompanion(
+              }) => StepAnnotationsCompanion(
+                id: id,
                 stepId: stepId,
-                shape: shape,
+                kind: kind,
+                shapeType: shapeType,
+                color: color,
                 x: x,
                 y: y,
                 w: w,
                 h: h,
+                label: label,
+                sortOrder: sortOrder,
                 updatedAt: updatedAt,
               ),
           createCompanionCallback:
               ({
-                Value<int> stepId = const Value.absent(),
-                Value<int> shape = const Value.absent(),
+                Value<int> id = const Value.absent(),
+                required int stepId,
+                Value<int> kind = const Value.absent(),
+                Value<int?> shapeType = const Value.absent(),
+                Value<int> color = const Value.absent(),
                 required double x,
                 required double y,
                 required double w,
                 required double h,
+                Value<String?> label = const Value.absent(),
+                Value<int> sortOrder = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
-              }) => StepHighlightsCompanion.insert(
+              }) => StepAnnotationsCompanion.insert(
+                id: id,
                 stepId: stepId,
-                shape: shape,
+                kind: kind,
+                shapeType: shapeType,
+                color: color,
                 x: x,
                 y: y,
                 w: w,
                 h: h,
+                label: label,
+                sortOrder: sortOrder,
                 updatedAt: updatedAt,
               ),
           withReferenceMapper: (p0) => p0
               .map(
                 (e) => (
                   e.readTable(table),
-                  $$StepHighlightsTableReferences(db, table, e),
+                  $$StepAnnotationsTableReferences(db, table, e),
                 ),
               )
               .toList(),
@@ -2849,10 +3211,11 @@ class $$StepHighlightsTableTableManager
                           state.withJoin(
                                 currentTable: table,
                                 currentColumn: table.stepId,
-                                referencedTable: $$StepHighlightsTableReferences
-                                    ._stepIdTable(db),
+                                referencedTable:
+                                    $$StepAnnotationsTableReferences
+                                        ._stepIdTable(db),
                                 referencedColumn:
-                                    $$StepHighlightsTableReferences
+                                    $$StepAnnotationsTableReferences
                                         ._stepIdTable(db)
                                         .id,
                               )
@@ -2870,18 +3233,18 @@ class $$StepHighlightsTableTableManager
       );
 }
 
-typedef $$StepHighlightsTableProcessedTableManager =
+typedef $$StepAnnotationsTableProcessedTableManager =
     ProcessedTableManager<
       _$AppDatabase,
-      $StepHighlightsTable,
-      StepHighlight,
-      $$StepHighlightsTableFilterComposer,
-      $$StepHighlightsTableOrderingComposer,
-      $$StepHighlightsTableAnnotationComposer,
-      $$StepHighlightsTableCreateCompanionBuilder,
-      $$StepHighlightsTableUpdateCompanionBuilder,
-      (StepHighlight, $$StepHighlightsTableReferences),
-      StepHighlight,
+      $StepAnnotationsTable,
+      StepAnnotation,
+      $$StepAnnotationsTableFilterComposer,
+      $$StepAnnotationsTableOrderingComposer,
+      $$StepAnnotationsTableAnnotationComposer,
+      $$StepAnnotationsTableCreateCompanionBuilder,
+      $$StepAnnotationsTableUpdateCompanionBuilder,
+      (StepAnnotation, $$StepAnnotationsTableReferences),
+      StepAnnotation,
       PrefetchHooks Function({bool stepId})
     >;
 
@@ -2894,6 +3257,6 @@ class $AppDatabaseManager {
       $$GuidesTableTableManager(_db, _db.guides);
   $$StepsTableTableManager get steps =>
       $$StepsTableTableManager(_db, _db.steps);
-  $$StepHighlightsTableTableManager get stepHighlights =>
-      $$StepHighlightsTableTableManager(_db, _db.stepHighlights);
+  $$StepAnnotationsTableTableManager get stepAnnotations =>
+      $$StepAnnotationsTableTableManager(_db, _db.stepAnnotations);
 }

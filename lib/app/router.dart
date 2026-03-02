@@ -7,8 +7,9 @@ import 'package:caregiver_guides/features/devices/ui/devices_list_screen.dart';
 import 'package:caregiver_guides/features/guides/ui/guide_detail_screen.dart';
 
 // Prefix these two to *guarantee* no symbol confusion
-import 'package:caregiver_guides/features/steps/ui/step_create_screen.dart' as step_create;
-import 'package:caregiver_guides/features/steps/ui/step_viewer_screen.dart' as step_viewer;
+import '../features/steps/ui/step_create_screen.dart' as step_create;
+import '../features/steps/ui/step_viewer_screen.dart' as step_viewer;
+
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -36,6 +37,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                   return GuideDetailScreen(guideId: guideId);
                 },
                 routes: [
+                  // create new step
                   GoRoute(
                     path: 'steps/new',
                     builder: (context, state) {
@@ -44,7 +46,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                     },
                   ),
 
-                  // ✅ NEW: edit existing step
+                  // edit existing step
                   GoRoute(
                     path: 'steps/:stepId/edit',
                     builder: (context, state) {

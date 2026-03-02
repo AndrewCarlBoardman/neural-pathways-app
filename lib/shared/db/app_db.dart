@@ -9,12 +9,12 @@ import 'tables.dart';
 
 part 'app_db.g.dart';
 
-@DriftDatabase(tables: [Devices, Guides, Steps, StepHighlights])
+@DriftDatabase(tables: [Devices, Guides, Steps, StepAnnotations])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -22,15 +22,43 @@ class AppDatabase extends _$AppDatabase {
       await m.createAll();
     },
     onUpgrade: (m, from, to) async {
-      if (from < 3) {
-        // StepHighlights structure changed (1 per step).
-        await m.deleteTable('step_highlights');
-        await m.createTable(stepHighlights);
+      // v4 introduces StepAnnotations and removes StepHighlights.
+      if (from < 4) {
+        await m.createTable(stepAnnotations);
+
+        // migrate legacy step_highlights (single box per step) -> step_annotations (shape)
+        try {
+          final oldRows = await customSelect(
+            'SELECT step_id, shape, x, y, w, h, updated_at FROM step_highlights;',
+          ).get();
+
+          for (final r in oldRows) {
+            await into(stepAnnotations).insert(
+              StepAnnotationsCompanion(
+                stepId: Value(r.read<int>('step_id')),
+                kind: const Value(0), // shape
+                shapeType: Value(r.read<int>('shape')),
+                color: const Value(0), // default yellow
+                x: Value(r.read<double>('x')),
+                y: Value(r.read<double>('y')),
+                w: Value(r.read<double>('w')),
+                h: Value(r.read<double>('h')),
+                label: const Value(null),
+                sortOrder: const Value(0),
+                updatedAt: Value(r.read<DateTime>('updated_at')),
+              ),
+            );
+          }
+
+          await m.deleteTable('step_highlights');
+        } catch (_) {
+          // old table doesn't exist -> nothing to migrate
+        }
       }
     },
   );
 
-  // --- Devices ---
+  // ----------------- Devices -----------------
   Stream<List<Device>> watchDevices() {
     return (select(devices)..orderBy([(t) => OrderingTerm.desc(t.createdAt)])).watch();
   }
@@ -51,7 +79,7 @@ class AppDatabase extends _$AppDatabase {
     return (select(devices)..where((t) => t.id.equals(id))).getSingleOrNull();
   }
 
-  // --- Guides ---
+  // ----------------- Guides -----------------
   Stream<List<Guide>> watchGuidesForDevice(int deviceId) {
     return (select(guides)
       ..where((t) => t.deviceId.equals(deviceId))
@@ -75,7 +103,7 @@ class AppDatabase extends _$AppDatabase {
     return (select(guides)..where((t) => t.id.equals(id))).getSingleOrNull();
   }
 
-  // --- Steps ---
+  // ----------------- Steps -----------------
   Stream<List<Step>> watchStepsForGuide(int guideId) {
     return (select(steps)
       ..where((t) => t.guideId.equals(guideId))
@@ -126,57 +154,43 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
-
-  // --- Highlights (1 per Step) ---
-  Stream<StepHighlight?> watchHighlightForStep(int stepId) {
-    return (select(stepHighlights)..where((t) => t.stepId.equals(stepId)))
-        .watchSingleOrNull();
+  // ----------------- StepAnnotations -----------------
+  Stream<List<StepAnnotation>> watchAnnotationsForStep(int stepId) {
+    return (select(stepAnnotations)
+      ..where((t) => t.stepId.equals(stepId))
+      ..orderBy([(t) => OrderingTerm.asc(t.sortOrder)]))
+        .watch();
   }
 
-  Future<StepHighlight?> getHighlightForStep(int stepId) {
-    return (select(stepHighlights)..where((t) => t.stepId.equals(stepId)))
-        .getSingleOrNull();
+  Future<List<StepAnnotation>> getAnnotationsForStep(int stepId) {
+    return (select(stepAnnotations)
+      ..where((t) => t.stepId.equals(stepId))
+      ..orderBy([(t) => OrderingTerm.asc(t.sortOrder)]))
+        .get();
   }
 
-  Future<void> upsertHighlight({
+  Future<void> replaceAnnotationsForStep({
     required int stepId,
-    required int shape, // 0 = rect (for now)
-    required double x,
-    required double y,
-    required double w,
-    required double h,
+    required List<StepAnnotationsCompanion> rows,
   }) async {
-    double c(double v) => v.clamp(0.0, 1.0);
-
-    // IMPORTANT: Use the Companion constructor (Value wrappers) instead of `.insert(...)`
-    // to avoid factory-signature mismatches during schema changes.
-    await into(stepHighlights).insertOnConflictUpdate(
-      StepHighlightsCompanion(
-        stepId: Value(stepId),
-        shape: Value(shape),
-        x: Value(c(x)),
-        y: Value(c(y)),
-        w: Value(c(w)),
-        h: Value(c(h)),
-        updatedAt: Value(DateTime.now()),
-      ),
-    );
+    await transaction(() async {
+      await (delete(stepAnnotations)..where((t) => t.stepId.equals(stepId))).go();
+      for (final r in rows) {
+        await into(stepAnnotations).insert(r);
+      }
+    });
   }
 
-  Future<void> deleteHighlightForStep(int stepId) async {
-    await (delete(stepHighlights)..where((t) => t.stepId.equals(stepId))).go();
+  Future<void> deleteAnnotationsForStep(int stepId) async {
+    await (delete(stepAnnotations)..where((t) => t.stepId.equals(stepId))).go();
   }
 
   Future<void> deleteStep(int stepId) async {
     await transaction(() async {
-      // 1 highlight per step (your schema), so delete it first
-      await (delete(stepHighlights)..where((t) => t.stepId.equals(stepId))).go();
-
-      // Then delete the step itself
+      await deleteAnnotationsForStep(stepId);
       await (delete(steps)..where((t) => t.id.equals(stepId))).go();
     });
   }
-
 }
 
 LazyDatabase _openConnection() {
