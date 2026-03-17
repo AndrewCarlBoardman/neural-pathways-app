@@ -23,14 +23,11 @@ StreamProvider.family<List<StepAnnotation>, int>((ref, stepId) {
   return db.watchAnnotationsForStep(stepId);
 });
 
-/// Same encoding used by StepCreateScreen.
 class _StepImagesPayload {
   final _StepImageRef? a;
   final _StepImageRef? b;
 
   const _StepImagesPayload({required this.a, required this.b});
-
-  bool get hasTwo => b != null;
 
   static _StepImagesPayload fromPhotoPath(String? raw) {
     if (raw == null || raw.trim().isEmpty) {
@@ -130,7 +127,9 @@ class _StepViewerScreenState extends ConsumerState<StepViewerScreen> {
     final stepsAsync = ref.watch(stepsForViewerProvider(widget.guideId));
 
     return Scaffold(
-      appBar: AppBar(title: const Text('User View')),
+      appBar: AppBar(
+        title: const Text('User View'),
+      ),
       body: stepsAsync.when(
         data: (steps) {
           if (steps.isEmpty) return const Center(child: Text('No steps yet.'));
@@ -154,37 +153,36 @@ class _StepViewerScreenState extends ConsumerState<StepViewerScreen> {
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                     annAsync.when(
                       data: (all) {
                         final a1 = _annsForSlot(all, 1);
                         final a2 = _annsForSlot(all, 2);
-                        return _StepImagesViewer(
+
+                        return _StepContentViewer(
+                          text1: step.instructionText,
+                          text2: step.instructionText2,
                           img1: payload.a,
                           img2: payload.b,
                           anns1: a1,
                           anns2: a2,
                         );
                       },
-                      loading: () => _StepImagesViewer(
+                      loading: () => _StepContentViewer(
+                        text1: step.instructionText,
+                        text2: step.instructionText2,
                         img1: payload.a,
                         img2: payload.b,
                         anns1: const [],
                         anns2: const [],
                       ),
-                      error: (_, __) => _StepImagesViewer(
+                      error: (_, __) => _StepContentViewer(
+                        text1: step.instructionText,
+                        text2: step.instructionText2,
                         img1: payload.a,
                         img2: payload.b,
                         anns1: const [],
                         anns2: const [],
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    Text(
-                      step.instructionText,
-                      style: const TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ],
@@ -207,9 +205,8 @@ class _StepViewerScreenState extends ConsumerState<StepViewerScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: FilledButton(
-                          onPressed: index == steps.length - 1
-                              ? null
-                              : () => _next(steps),
+                          onPressed:
+                          index == steps.length - 1 ? null : () => _next(steps),
                           child: const Padding(
                             padding: EdgeInsets.symmetric(vertical: 16),
                             child: Text('Next', style: TextStyle(fontSize: 18)),
@@ -230,13 +227,17 @@ class _StepViewerScreenState extends ConsumerState<StepViewerScreen> {
   }
 }
 
-class _StepImagesViewer extends StatelessWidget {
+class _StepContentViewer extends StatelessWidget {
+  final String text1;
+  final String? text2;
   final _StepImageRef? img1;
   final _StepImageRef? img2;
   final List<StepAnnotation> anns1;
   final List<StepAnnotation> anns2;
 
-  const _StepImagesViewer({
+  const _StepContentViewer({
+    required this.text1,
+    required this.text2,
     required this.img1,
     required this.img2,
     required this.anns1,
@@ -245,88 +246,101 @@ class _StepImagesViewer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final has1 = img1 != null && img1!.path.trim().isNotEmpty;
-    final has2 = img2 != null && img2!.path.trim().isNotEmpty;
+    final blocks = <Widget>[];
 
-    if (!has1 && !has2) {
-      return ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: AspectRatio(
-            aspectRatio: _frameAspectRatio,
-            child: Container(
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Theme.of(context).colorScheme.outline),
-              ),
-              child: const Text('No image'),
+    blocks.add(
+      Text(
+        text1,
+        style: const TextStyle(
+          fontSize: 26,
+          fontWeight: FontWeight.w800,
+          height: 1.25,
+        ),
+      ),
+    );
+    blocks.add(const SizedBox(height: 12));
+    blocks.add(_FramedImageWithOverlay(img: img1, annotations: anns1));
+
+    final secondText = (text2 ?? '').trim();
+    final hasSecondImage = img2 != null && img2!.path.trim().isNotEmpty;
+
+    if (secondText.isNotEmpty || hasSecondImage) {
+      blocks.add(const SizedBox(height: 22));
+      if (secondText.isNotEmpty) {
+        blocks.add(
+          Text(
+            secondText,
+            style: const TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
+              height: 1.25,
             ),
           ),
-      );
+        );
+        blocks.add(const SizedBox(height: 12));
       }
-
-          if (!has2) {
-        return _FramedImageWithOverlay(img: img1!, annotations: anns1);
-      }
-
-      return Row(
-        children: [
-          Expanded(child: _FramedImageWithOverlay(img: img1, annotations: anns1)),
-          const SizedBox(width: 12),
-          Expanded(child: _FramedImageWithOverlay(img: img2, annotations: anns2)),
-        ],
-      );
+      blocks.add(_FramedImageWithOverlay(img: img2, annotations: anns2));
     }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: blocks,
+    );
+  }
 }
 
 class _FramedImageWithOverlay extends StatelessWidget {
   final _StepImageRef? img;
   final List<StepAnnotation> annotations;
 
-  const _FramedImageWithOverlay({required this.img, required this.annotations});
+  const _FramedImageWithOverlay({
+    required this.img,
+    required this.annotations,
+  });
 
   @override
   Widget build(BuildContext context) {
     if (img == null || img!.path.trim().isEmpty) {
       return ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: AspectRatio(
-            aspectRatio: _frameAspectRatio,
-            child: Container(
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Theme.of(context).colorScheme.outline),
-              ),
-              child: const Text('No image'),
+        borderRadius: BorderRadius.circular(16),
+        child: AspectRatio(
+          aspectRatio: _frameAspectRatio,
+          child: Container(
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Theme.of(context).colorScheme.outline),
             ),
+            child: const Text('No image'),
           ),
+        ),
       );
-          }
+    }
 
-          return ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-    child: AspectRatio(
-    aspectRatio: _frameAspectRatio,
-    child: Container(
-    decoration: BoxDecoration(
-    borderRadius: BorderRadius.circular(16),
-    border: Border.all(color: Theme.of(context).colorScheme.outline),
-    ),
-    child: Stack(
-    fit: StackFit.expand,
-    children: [
-    _TransformedImageFill(
-    file: img!.file,
-    scale: img!.scale,
-    tx: img!.tx,
-    ty: img!.ty,
-    ),
-    if (annotations.isNotEmpty) HighlightOverlay(annotations: annotations),
-    ],
-    ),
-    ),
-    ),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: AspectRatio(
+        aspectRatio: _frameAspectRatio,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Theme.of(context).colorScheme.outline),
+          ),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _TransformedImageFill(
+                file: img!.file,
+                scale: img!.scale,
+                tx: img!.tx,
+                ty: img!.ty,
+              ),
+              if (annotations.isNotEmpty)
+                HighlightOverlay(annotations: annotations),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -351,6 +365,7 @@ class _TransformedImageFill extends StatelessWidget {
         final m = Matrix4.identity()
           ..translate(tx * constraints.maxWidth, ty * constraints.maxHeight)
           ..scale(scale, scale);
+
         return ClipRect(
           child: Transform(
             transform: m,

@@ -11,6 +11,7 @@ class Guides extends Table {
   IntColumn get id => integer().autoIncrement()();
   IntColumn get deviceId => integer().references(Devices, #id)();
   TextColumn get title => text().withLength(min: 1, max: 160)();
+  TextColumn get coverPhotoPath => text().nullable()(); // local file path
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 }
 
@@ -18,15 +19,19 @@ class Steps extends Table {
   IntColumn get id => integer().autoIncrement()();
   IntColumn get guideId => integer().references(Guides, #id)();
   IntColumn get stepIndex => integer()(); // 1..n
+
+  /// Text shown above image 1.
   TextColumn get instructionText => text().withLength(min: 1, max: 300)();
+
+  /// Optional text shown above image 2.
+  TextColumn get instructionText2 => text().nullable().withLength(min: 0, max: 300)();
+
   TextColumn get photoPath => text().nullable()(); // local file path
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 }
 
-/// Replaces StepHighlights: multiple annotations per step (shapes + text).
 class StepAnnotations extends Table {
   IntColumn get id => integer().autoIncrement()();
-
   IntColumn get stepId => integer().references(Steps, #id)();
 
   /// 0 = shape, 1 = text
@@ -39,17 +44,12 @@ class StepAnnotations extends Table {
   /// 0 = yellow, 1 = red, 2 = blue
   IntColumn get color => integer().withDefault(const Constant(0))();
 
-  /// Relative coords 0..1 (same idea as before)
-  RealColumn get x => real()(); // left
-  RealColumn get y => real()(); // top
-  RealColumn get w => real()(); // width
-  RealColumn get h => real()(); // height
+  RealColumn get x => real()();
+  RealColumn get y => real()();
+  RealColumn get w => real()();
+  RealColumn get h => real()();
 
-  /// For kind=text (renamed from `text` -> `label` to avoid drift analyzer crash)
   TextColumn get label => text().nullable()();
-
-  /// Optional: simple ordering if needed later
   IntColumn get sortOrder => integer().withDefault(const Constant(0))();
-
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 }

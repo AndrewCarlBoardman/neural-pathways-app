@@ -15,12 +15,6 @@ import '../../../shared/db/db_provider.dart';
 import '../../highlights/highlight_editor_screen.dart';
 import '../../highlights/highlight_overlay.dart';
 
-/// We need to keep highlights separate per image, but (for now) the DB table
-/// is only keyed by stepId.
-///
-/// Solution (no DB changes needed): we encode the image slot into sortOrder.
-/// - slot 1: sortOrder 0..999
-/// - slot 2: sortOrder 1000..1999
 const int _slot2SortOrderBase = 1000;
 const double _frameAspectRatio = 1.0;
 
@@ -30,22 +24,11 @@ StreamProvider.family<List<StepAnnotation>, int>((ref, stepId) {
   return db.watchAnnotationsForStep(stepId);
 });
 
-/// Image reference stored inside the step.photoPath column.
-///
-/// Backwards-compatible:
-/// - legacy: photoPath is a plain file path
-/// - legacy: "path1||path2" delimiter
-/// - new: JSON string {"v":1,"a":{...},"b":{...}}
-///
-/// Each slot can optionally store a transform (scale + translation) so the
-/// image can be framed consistently across preview/viewer/highlight editor.
 class _StepImagesPayload {
   final _StepImageRef? a;
   final _StepImageRef? b;
 
   const _StepImagesPayload({required this.a, required this.b});
-
-  bool get hasTwo => b != null;
 
   static _StepImagesPayload fromPhotoPath(String? raw) {
     if (raw == null || raw.trim().isEmpty) {
@@ -54,7 +37,6 @@ class _StepImagesPayload {
 
     final s = raw.trim();
 
-    // Legacy delimiter format: "path1||path2".
     if (!s.startsWith('{') && s.contains('||')) {
       final parts = s.split('||');
       final a = parts.isNotEmpty && parts[0].trim().isNotEmpty
@@ -66,12 +48,10 @@ class _StepImagesPayload {
       return _StepImagesPayload(a: a, b: b);
     }
 
-    // Legacy single-path.
     if (!s.startsWith('{')) {
       return _StepImagesPayload(a: _StepImageRef(path: s), b: null);
     }
 
-    // JSON format.
     try {
       final map = jsonDecode(s) as Map<String, dynamic>;
       final aMap = map['a'] as Map<String, dynamic>?;
@@ -81,7 +61,6 @@ class _StepImagesPayload {
         b: bMap == null ? null : _StepImageRef.fromJson(bMap),
       );
     } catch (_) {
-      // If something goes wrong, fail safely as legacy path.
       return _StepImagesPayload(a: _StepImageRef(path: s), b: null);
     }
   }
@@ -97,29 +76,7 @@ class _StepImagesPayload {
   }
 }
 
-
-class _ImageAspectCache {
-  static final Map<String, Future<double>> _cache = {};
-
-  static Future<double> aspectRatioFor(File file) {
-    final key = file.path;
-    return _cache.putIfAbsent(key, () async {
-      try {
-        final bytes = await file.readAsBytes();
-        final completer = Completer<ui.Image>();
-        ui.decodeImageFromList(bytes, (img) => completer.complete(img));
-        final img = await completer.future;
-        if (img.height == 0) return 1.0;
-        return img.width / img.height;
-      } catch (_) {
-        return 1.0;
-      }
-    });
-  }
-}
-
-class _StepImageRef
-{
+class _StepImageRef {
   final String path;
   final double scale;
   final double tx;
@@ -133,15 +90,6 @@ class _StepImageRef
   });
 
   File get file => File(path);
-
-  _StepImageRef copyWith({String? path, double? scale, double? tx, double? ty}) {
-    return _StepImageRef(
-      path: path ?? this.path,
-      scale: scale ?? this.scale,
-      tx: tx ?? this.tx,
-      ty: ty ?? this.ty,
-    );
-  }
 
   static _StepImageRef fromJson(Map<String, dynamic> json) {
     return _StepImageRef(
@@ -164,7 +112,7 @@ class _StepImageRef
 
 class StepCreateScreen extends ConsumerStatefulWidget {
   final int guideId;
-  final int? stepId; // null=create, non-null=edit
+  final int? stepId;
 
   const StepCreateScreen({
     super.key,
@@ -178,7 +126,8 @@ class StepCreateScreen extends ConsumerStatefulWidget {
 
 class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _instructionController = TextEditingController();
+  final _instruction1Controller = TextEditingController();
+  final _instruction2Controller = TextEditingController();
 
   bool _loading = true;
   bool _twoImages = false;
@@ -200,7 +149,8 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
     final db = ref.read(dbProvider);
     final step = await db.getStepById(widget.stepId!);
     if (step != null) {
-      _instructionController.text = step.instructionText;
+      _instruction1Controller.text = step.instructionText;
+      _instruction2Controller.text = step.instructionText2 ?? '';
       final payload = _StepImagesPayload.fromPhotoPath(step.photoPath);
       _img1 = payload.a;
       _img2 = payload.b;
@@ -297,7 +247,8 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
     if (widget.stepId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Save the step first, then edit highlights.')),
+          content: Text('Save the step first, then edit highlights.'),
+        ),
       );
       return;
     }
@@ -308,8 +259,9 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
     final db = ref.read(dbProvider);
     final allExisting = await db.getAnnotationsForStep(widget.stepId!);
     final existingForSlot = _annsForSlot(allExisting, slot);
-
     final imageProvider = FileImage(img.file);
+
+    if (!mounted) return;
 
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -321,13 +273,10 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
           framingTy: img.ty,
           existing: existingForSlot,
           onSave: (items) async {
-            // Keep the other slot intact.
             final keepOther = _annsForSlot(allExisting, slot == 1 ? 2 : 1);
-
             final rows = <StepAnnotationsCompanion>[];
 
             if (slot == 1) {
-              // Save slot 1 (0..)
               for (var i = 0; i < items.length; i++) {
                 final d = items[i];
                 rows.add(
@@ -345,7 +294,6 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
                   ),
                 );
               }
-              // Keep slot 2 as-is
               for (final a in keepOther) {
                 rows.add(
                   StepAnnotationsCompanion(
@@ -363,7 +311,6 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
                 );
               }
             } else {
-              // Keep slot 1 as-is
               for (final a in keepOther) {
                 rows.add(
                   StepAnnotationsCompanion(
@@ -380,7 +327,6 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
                   ),
                 );
               }
-              // Save slot 2 (1000 + i)
               for (var i = 0; i < items.length; i++) {
                 final d = items[i];
                 rows.add(
@@ -400,10 +346,11 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
               }
             }
 
-            rows.sort(
-                    (a, b) => a.sortOrder.value.compareTo(b.sortOrder.value));
+            rows.sort((a, b) => a.sortOrder.value.compareTo(b.sortOrder.value));
             await db.replaceAnnotationsForStep(
-                stepId: widget.stepId!, rows: rows);
+              stepId: widget.stepId!,
+              rows: rows,
+            );
           },
         ),
       ),
@@ -414,9 +361,9 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     final db = ref.read(dbProvider);
-    final instruction = _instructionController.text.trim();
+    final instruction1 = _instruction1Controller.text.trim();
+    final instruction2 = _twoImages ? _instruction2Controller.text.trim() : '';
 
-    // If toggle is 1 image, make sure slot 2 is cleared.
     final img2 = _twoImages ? _img2 : null;
     final payload = _StepImagesPayload(a: _img1, b: img2);
 
@@ -425,17 +372,18 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
       await db.createStep(
         guideId: widget.guideId,
         stepIndex: index,
-        instructionText: instruction,
+        instructionText: instruction1,
+        instructionText2: instruction2.isEmpty ? null : instruction2,
         photoPath: payload.toPhotoPathString(),
       );
     } else {
       await db.updateStep(
         stepId: widget.stepId!,
-        instructionText: instruction,
+        instructionText: instruction1,
+        instructionText2: instruction2.isEmpty ? null : instruction2,
         photoPath: payload.toPhotoPathString(),
       );
 
-      // If we just switched from 2 -> 1, purge slot-2 highlights.
       if (!_twoImages) {
         final all = await db.getAnnotationsForStep(widget.stepId!);
         final keep =
@@ -462,6 +410,18 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
     }
 
     if (!mounted) return;
+    Navigator.pop(context, true);
+  }
+
+  Future<void> _duplicateStep() async {
+    if (widget.stepId == null) return;
+    final db = ref.read(dbProvider);
+    await db.duplicateStep(widget.stepId!);
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Step copied')),
+    );
     Navigator.pop(context, true);
   }
 
@@ -493,6 +453,29 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
     Navigator.pop(context, true);
   }
 
+  Widget _instructionField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required bool requiredField,
+  }) {
+    return TextFormField(
+      controller: controller,
+      maxLines: 3,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        border: const OutlineInputBorder(),
+      ),
+      validator: (v) {
+        if (requiredField && (v == null || v.trim().isEmpty)) {
+          return 'Please enter text';
+        }
+        return null;
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -509,40 +492,56 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
       appBar: AppBar(
         title: Text(widget.stepId == null ? 'Create Step' : 'Edit Step'),
         actions: [
-          if (widget.stepId != null)
-            IconButton(
-              icon: const Icon(Icons.delete_outline),
-              onPressed: _deleteStep,
-            ),
-          IconButton(
-            icon: const Icon(Icons.check),
-            onPressed: _save,
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'copy') {
+                _duplicateStep();
+              } else if (value == 'delete') {
+                _deleteStep();
+              } else if (value == 'save') {
+                _save();
+              }
+            },
+            itemBuilder: (context) => [
+              if (widget.stepId != null)
+                const PopupMenuItem<String>(
+                  value: 'copy',
+                  child: Row(
+                    children: [
+                      Icon(Icons.copy),
+                      SizedBox(width: 12),
+                      Text('Copy step'),
+                    ],
+                  ),
+                ),
+              if (widget.stepId != null)
+                const PopupMenuItem<String>(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete_outline),
+                      SizedBox(width: 12),
+                      Text('Delete step'),
+                    ],
+                  ),
+                ),
+              const PopupMenuItem<String>(
+                value: 'save',
+                child: Row(
+                  children: [
+                    Icon(Icons.check),
+                    SizedBox(width: 12),
+                    Text('Save'),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Form(
-            key: _formKey,
-            child: TextFormField(
-              controller: _instructionController,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                labelText: 'Instruction',
-                border: OutlineInputBorder(),
-              ),
-              validator: (v) {
-                if (v == null || v.trim().isEmpty) {
-                  return 'Please enter an instruction';
-                }
-                return null;
-              },
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          // Toggle 1 / 2 images
           Center(
             child: SegmentedButton<bool>(
               segments: const [
@@ -554,37 +553,51 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
                 final v = s.first;
                 setState(() {
                   _twoImages = v;
-                  if (!v) _img2 = null;
+                  if (!v) {
+                    _img2 = null;
+                    _instruction2Controller.clear();
+                  }
                 });
               },
             ),
           ),
           const SizedBox(height: 14),
+          Form(
+            key: _formKey,
+            child: annAsync.when(
+              data: (all) {
+                final anns1 = _annsForSlot(all, 1);
+                final anns2 = _annsForSlot(all, 2);
 
-          annAsync.when(
-            data: (all) {
-              final anns1 = _annsForSlot(all, 1);
-              final anns2 = _annsForSlot(all, 2);
-
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: _StepImageEditorTile(
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _instructionField(
+                      controller: _instruction1Controller,
+                      label: 'Text for Image 1',
+                      hint: 'e.g. Press the red power button',
+                      requiredField: true,
+                    ),
+                    const SizedBox(height: 12),
+                    _StepImageEditorTile(
                       title: 'Image 1',
                       image: _img1,
                       annotations: anns1,
                       onAddOrReplace: () => _pickOrCaptureForSlot(1),
                       onAdjust: () => _adjustExisting(1),
-                      onHighlights: (_img1 == null)
-                          ? null
-                          : () => _openHighlightEditor(1),
+                      onHighlights:
+                      (_img1 == null) ? null : () => _openHighlightEditor(1),
                     ),
-                  ),
-                  if (_twoImages) ...[
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _StepImageEditorTile(
+                    if (_twoImages) ...[
+                      const SizedBox(height: 18),
+                      _instructionField(
+                        controller: _instruction2Controller,
+                        label: 'Text for Image 2',
+                        hint: 'e.g. Then press the green start button',
+                        requiredField: true,
+                      ),
+                      const SizedBox(height: 12),
+                      _StepImageEditorTile(
                         title: 'Image 2',
                         image: _img2,
                         annotations: anns2,
@@ -594,36 +607,44 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
                             ? null
                             : () => _openHighlightEditor(2),
                       ),
-                    ),
+                    ],
                   ],
-                ],
-              );
-            },
-            loading: () => const SizedBox(
-              height: 260,
-              child: Center(child: CircularProgressIndicator()),
-            ),
-            error: (_, __) {
-              // Still allow editing without highlights.
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: _StepImageEditorTile(
+                );
+              },
+              loading: () => const SizedBox(
+                height: 260,
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (_, __) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _instructionField(
+                      controller: _instruction1Controller,
+                      label: 'Text for Image 1',
+                      hint: 'e.g. Press the red power button',
+                      requiredField: true,
+                    ),
+                    const SizedBox(height: 12),
+                    _StepImageEditorTile(
                       title: 'Image 1',
                       image: _img1,
                       annotations: const [],
                       onAddOrReplace: () => _pickOrCaptureForSlot(1),
                       onAdjust: () => _adjustExisting(1),
-                      onHighlights: (_img1 == null)
-                          ? null
-                          : () => _openHighlightEditor(1),
+                      onHighlights:
+                      (_img1 == null) ? null : () => _openHighlightEditor(1),
                     ),
-                  ),
-                  if (_twoImages) ...[
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _StepImageEditorTile(
+                    if (_twoImages) ...[
+                      const SizedBox(height: 18),
+                      _instructionField(
+                        controller: _instruction2Controller,
+                        label: 'Text for Image 2',
+                        hint: 'e.g. Then press the green start button',
+                        requiredField: true,
+                      ),
+                      const SizedBox(height: 12),
+                      _StepImageEditorTile(
                         title: 'Image 2',
                         image: _img2,
                         annotations: const [],
@@ -633,15 +654,14 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
                             ? null
                             : () => _openHighlightEditor(2),
                       ),
-                    ),
+                    ],
                   ],
-                ],
-              );
-            },
+                );
+              },
+            ),
           ),
-
           if (widget.stepId == null) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             const Text(
               'Tip: Save the step first to enable highlights.',
               style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
@@ -654,7 +674,8 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
 
   @override
   void dispose() {
-    _instructionController.dispose();
+    _instruction1Controller.dispose();
+    _instruction2Controller.dispose();
     super.dispose();
   }
 }
@@ -692,7 +713,6 @@ class _StepImageEditorTile extends StatelessWidget {
               return;
             }
 
-            // Tap on the image again: allow replace, plus quick adjust.
             showModalBottomSheet<void>(
               context: context,
               showDragHandle: true,
@@ -702,8 +722,7 @@ class _StepImageEditorTile extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       ListTile(
-                        leading:
-                        const Icon(Icons.photo_camera_back_outlined),
+                        leading: const Icon(Icons.photo_camera_back_outlined),
                         title: const Text('Replace image'),
                         onTap: () {
                           Navigator.pop(ctx);
@@ -826,8 +845,6 @@ class _TransformedImageFill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // We render using BoxFit.cover so the frame is always filled,
-    // then apply the user's transform (zoom/pan) deterministically.
     return LayoutBuilder(
       builder: (context, constraints) {
         final clampedScale = scale < 1.0 ? 1.0 : scale;
@@ -835,7 +852,10 @@ class _TransformedImageFill extends StatelessWidget {
         final clampedTx = tx < minT ? minT : (tx > 0.0 ? 0.0 : tx);
         final clampedTy = ty < minT ? minT : (ty > 0.0 ? 0.0 : ty);
         final m = Matrix4.identity()
-          ..translate(clampedTx * constraints.maxWidth, clampedTy * constraints.maxHeight)
+          ..translate(
+            clampedTx * constraints.maxWidth,
+            clampedTy * constraints.maxHeight,
+          )
           ..scale(clampedScale, clampedScale);
         return ClipRect(
           child: Transform(
@@ -853,8 +873,6 @@ class _TransformedImageFill extends StatelessWidget {
   }
 }
 
-
-
 class _FrameAdjustScreen extends StatefulWidget {
   final _StepImageRef initial;
 
@@ -870,15 +888,11 @@ class _FrameAdjustScreenState extends State<_FrameAdjustScreen> {
   static const double _maxUserScale = 6.0;
 
   late final TransformationController _controller;
-  final GlobalKey _viewportKey = GlobalKey();
 
   ui.Image? _decoded;
-  Object? _decodeError;
-
-  // Cached layout + mapping values (computed during build)
   Size _viewportSize = Size.zero;
   Rect _frameRect = Rect.zero;
-  double _baseScale = 1.0; // scales original image pixels -> child logical px at userScale=1
+  double _baseScale = 1.0;
   Size _childSize = Size.zero;
 
   bool _initializedTransform = false;
@@ -894,21 +908,13 @@ class _FrameAdjustScreenState extends State<_FrameAdjustScreen> {
   }
 
   Future<void> _decode() async {
-    try {
-      final bytes = await widget.initial.file.readAsBytes();
-      final codec = await ui.instantiateImageCodec(bytes);
-      final frame = await codec.getNextFrame();
-      if (!mounted) return;
-      setState(() {
-        _decoded = frame.image;
-        _decodeError = null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _decodeError = e;
-      });
-    }
+    final bytes = await widget.initial.file.readAsBytes();
+    final codec = await ui.instantiateImageCodec(bytes);
+    final frame = await codec.getNextFrame();
+    if (!mounted) return;
+    setState(() {
+      _decoded = frame.image;
+    });
   }
 
   @override
@@ -929,7 +935,6 @@ class _FrameAdjustScreenState extends State<_FrameAdjustScreen> {
   void _applyInitialTransform() {
     if (_viewportSize.isEmpty || _childSize.isEmpty) return;
 
-    // Center the base-scaled image in the viewport at userScale=1
     final dx = (_viewportSize.width - _childSize.width) / 2.0;
     final dy = (_viewportSize.height - _childSize.height) / 2.0;
 
@@ -944,32 +949,19 @@ class _FrameAdjustScreenState extends State<_FrameAdjustScreen> {
     if (_viewportSize.isEmpty || _frameRect.isEmpty || _childSize.isEmpty) return;
 
     final m = Matrix4.fromList(_controller.value.storage);
-
     final currentScale = m.getMaxScaleOnAxis();
     final clampedScale = currentScale < 1.0
         ? 1.0
         : (currentScale > _maxUserScale ? _maxUserScale : currentScale);
 
-    // Frame must be fully covered by the transformed child (no whitespace inside the frame).
-    // We clamp the child translation (after scale) so that:
-    // - left edge of child <= frame.left
-    // - top edge of child <= frame.top
-    // - right edge of child >= frame.right
-    // - bottom edge of child >= frame.bottom
     final childW = _childSize.width * clampedScale;
     final childH = _childSize.height * clampedScale;
 
     double tx = m.storage[12];
     double ty = m.storage[13];
 
-    // Allowed translation range (child in viewport coordinates):
-    // tx <= frame.left
-    // tx >= frame.right - childW
     final minTx = _frameRect.right - childW;
     final maxTx = _frameRect.left;
-
-    // ty <= frame.top
-    // ty >= frame.bottom - childH
     final minTy = _frameRect.bottom - childH;
     final maxTy = _frameRect.top;
 
@@ -994,12 +986,10 @@ class _FrameAdjustScreenState extends State<_FrameAdjustScreen> {
   }
 
   Future<void> _save() async {
-    // Ensure clamped before saving.
     _clampToFrame();
 
     final img = _decoded;
     if (img == null) return;
-
     if (_viewportSize.isEmpty || _frameRect.isEmpty || _childSize.isEmpty) return;
 
     final inv = Matrix4.inverted(_controller.value);
@@ -1007,13 +997,11 @@ class _FrameAdjustScreenState extends State<_FrameAdjustScreen> {
     Offset childTL = MatrixUtils.transformPoint(inv, _frameRect.topLeft);
     Offset childBR = MatrixUtils.transformPoint(inv, _frameRect.bottomRight);
 
-    // Child coords are in base-scaled pixels, convert back to original pixel coords.
     Rect src = Rect.fromPoints(
       Offset(childTL.dx / _baseScale, childTL.dy / _baseScale),
       Offset(childBR.dx / _baseScale, childBR.dy / _baseScale),
     );
 
-    // Clamp to image bounds.
     final imgW = img.width.toDouble();
     final imgH = img.height.toDouble();
 
@@ -1022,14 +1010,13 @@ class _FrameAdjustScreenState extends State<_FrameAdjustScreen> {
     double right = src.right.clamp(0.0, imgW);
     double bottom = src.bottom.clamp(0.0, imgH);
 
-    // Ensure square (numerical stability). Keep within bounds.
     final size = math.min(right - left, bottom - top);
     right = left + size;
     bottom = top + size;
 
     if (size <= 1) return;
 
-    final outSize = 1024;
+    const outSize = 1024;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     final dst = Rect.fromLTWH(0, 0, outSize.toDouble(), outSize.toDouble());
@@ -1039,10 +1026,8 @@ class _FrameAdjustScreenState extends State<_FrameAdjustScreen> {
     canvas.drawImageRect(img, srcRect, dst, paint);
 
     final picture = recorder.endRecording();
-    final outImage =
-    await picture.toImage(outSize, outSize);
-    final bytes =
-    await outImage.toByteData(format: ui.ImageByteFormat.png);
+    final outImage = await picture.toImage(outSize, outSize);
+    final bytes = await outImage.toByteData(format: ui.ImageByteFormat.png);
     if (bytes == null) return;
 
     final dir = widget.initial.file.parent;
@@ -1055,7 +1040,6 @@ class _FrameAdjustScreenState extends State<_FrameAdjustScreen> {
     Navigator.of(context).pop(
       _StepImageRef(
         path: outFile.path,
-        // Output is already square and final; no additional framing needed downstream.
         scale: 1.0,
         tx: 0.0,
         ty: 0.0,
@@ -1068,10 +1052,10 @@ class _FrameAdjustScreenState extends State<_FrameAdjustScreen> {
     final img = _decoded;
 
     return Scaffold(
-        backgroundColor: Colors.white,
+      backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white, // important for Material 3
+        surfaceTintColor: Colors.white,
         elevation: 0,
         scrolledUnderElevation: 0,
         foregroundColor: Colors.black,
@@ -1087,139 +1071,137 @@ class _FrameAdjustScreenState extends State<_FrameAdjustScreen> {
           ),
         ],
       ),
-        body: SafeArea(
-          child: Container(
-            color: Colors.white,
-            child: Column(
-              children: [
-                const SizedBox(height: 16),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    'Pinch to zoom and drag to position the image\ninside the frame.',
-                    textAlign: TextAlign.center,
-                  ),
+      body: SafeArea(
+        child: Container(
+          color: Colors.white,
+          child: Column(
+            children: [
+              const SizedBox(height: 16),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  'Pinch to zoom and drag to position the image\ninside the frame.',
+                  textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 16),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: AspectRatio(
+                      aspectRatio: 0.80,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final vw = constraints.maxWidth;
+                          final vh = constraints.maxHeight;
 
-                Expanded(
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 520),
-                      child: AspectRatio(
-                        aspectRatio: 0.80, // breathing room on tall screens
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            final vw = constraints.maxWidth;
-                            final vh = constraints.maxHeight;
+                          _viewportSize = Size(vw, vh);
 
-                            _viewportSize = Size(vw, vh);
+                          final frameSide = math.min(vw, vh) * 0.84;
+                          final frameLeft = (vw - frameSide) / 2.0;
+                          final frameTop = (vh - frameSide) / 2.0;
+                          _frameRect = Rect.fromLTWH(
+                            frameLeft,
+                            frameTop,
+                            frameSide,
+                            frameSide,
+                          );
 
-                            // Frame is a centered square leaving margins.
-                            final frameSide = math.min(vw, vh) * 0.84;
-                            final frameLeft = (vw - frameSide) / 2.0;
-                            final frameTop = (vh - frameSide) / 2.0;
-                            _frameRect = Rect.fromLTWH(frameLeft, frameTop, frameSide, frameSide);
+                          if (img != null) {
+                            final imgW = img.width.toDouble();
+                            final imgH = img.height.toDouble();
+                            final baseScale =
+                            math.max(frameSide / imgW, frameSide / imgH);
 
-                            // Child size: "cover" the frame at scale=1 (so panning works immediately).
-                            if (img != null) {
-                              final imgW = img.width.toDouble();
-                              final imgH = img.height.toDouble();
-                              final baseScale = math.max(frameSide / imgW, frameSide / imgH);
+                            _baseScale = baseScale;
+                            _childSize = Size(imgW * baseScale, imgH * baseScale);
 
-                              // Persist for _save() mapping back into original image pixels.
-                              _baseScale = baseScale;
-                              _childSize = Size(imgW * baseScale, imgH * baseScale);
-
-                              // Ensure we start centered (fixes initial left-offset when entering the screen).
-                              if (!_initializedTransform && !_pendingInitTransform) {
-                                _pendingInitTransform = true;
-                                WidgetsBinding.instance.addPostFrameCallback((_) {
-                                  _pendingInitTransform = false;
-                                  _applyInitialTransform();
-                                });
-                              }
-                            } else {
-                              _childSize = const Size(1, 1);
+                            if (!_initializedTransform && !_pendingInitTransform) {
+                              _pendingInitTransform = true;
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                _pendingInitTransform = false;
+                                _applyInitialTransform();
+                              });
                             }
+                          } else {
+                            _childSize = const Size(1, 1);
+                          }
 
-                            return ClipRect(
-                              child: Stack(
-                                fit: StackFit.expand,
-                                children: [
-                                  // Full image (user pans/zooms). Outside the frame will be hidden by the white scrim.
-                                  if (img == null)
-                                    const Center(child: CircularProgressIndicator())
-                                  else
-                                    InteractiveViewer(
-                                      transformationController: _controller,
-                                      minScale: 0.5,
-                                      maxScale: _maxUserScale,
-                                      boundaryMargin: const EdgeInsets.all(double.infinity),
-                                      constrained: false,
-                                      onInteractionEnd: (_) => _clampToFrame(),
-                                      child: SizedBox(
-                                        width: _childSize.width,
-                                        height: _childSize.height,
-                                        child: RawImage(
-                                          image: img,
-                                          fit: BoxFit.fill,
-                                          filterQuality: FilterQuality.high,
-                                        ),
-                                      ),
-                                    ),
-
-                                  // White outside the frame (no border / no grey panel).
-                                  IgnorePointer(
-                                    child: CustomPaint(
-                                      painter: _SquareHoleScrimPainter(
-                                        holeRect: _frameRect,
-                                        color: Colors.white,
-                                        opacity: 1.0,
-                                        radius: 16,
+                          return ClipRect(
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                if (img == null)
+                                  const Center(child: CircularProgressIndicator())
+                                else
+                                  InteractiveViewer(
+                                    transformationController: _controller,
+                                    minScale: 0.5,
+                                    maxScale: _maxUserScale,
+                                    boundaryMargin:
+                                    const EdgeInsets.all(double.infinity),
+                                    constrained: false,
+                                    onInteractionEnd: (_) => _clampToFrame(),
+                                    child: SizedBox(
+                                      width: _childSize.width,
+                                      height: _childSize.height,
+                                      child: RawImage(
+                                        image: img,
+                                        fit: BoxFit.fill,
+                                        filterQuality: FilterQuality.high,
                                       ),
                                     ),
                                   ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
+                                IgnorePointer(
+                                  child: CustomPaint(
+                                    painter: _SquareHoleScrimPainter(
+                                      holeRect: _frameRect,
+                                      color: Colors.white,
+                                      opacity: 1.0,
+                                      radius: 16,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
                       ),
                     ),
                   ),
                 ),
-
-                const SizedBox(height: 16),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Reset'),
-                          onPressed: _reset,
-                        ),
+              ),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Reset'),
+                        onPressed: _reset,
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton.icon(
-                          icon: const Icon(Icons.check),
-                          label: const Text('Use framing'),
-                          onPressed: _save,
-                        ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton.icon(
+                        icon: const Icon(Icons.check),
+                        label: const Text('Use framing'),
+                        onPressed: _save,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 16),
-              ],
-            ),
+              ),
+              const SizedBox(height: 16),
+            ],
           ),
         ),
+      ),
     );
-    }
+  }
 }
 
 class _SquareHoleScrimPainter extends CustomPainter {
@@ -1239,7 +1221,6 @@ class _SquareHoleScrimPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final paint = Paint()..color = color.withOpacity(opacity);
 
-    // Draw dim layer and clear the hole within the same saved layer.
     canvas.saveLayer(Offset.zero & size, Paint());
     canvas.drawRect(Offset.zero & size, paint);
 

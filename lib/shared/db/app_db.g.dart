@@ -355,6 +355,17 @@ class $GuidesTable extends Guides with TableInfo<$GuidesTable, Guide> {
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _coverPhotoPathMeta = const VerificationMeta(
+    'coverPhotoPath',
+  );
+  @override
+  late final GeneratedColumn<String> coverPhotoPath = GeneratedColumn<String>(
+    'cover_photo_path',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -368,7 +379,13 @@ class $GuidesTable extends Guides with TableInfo<$GuidesTable, Guide> {
     defaultValue: currentDateAndTime,
   );
   @override
-  List<GeneratedColumn> get $columns => [id, deviceId, title, createdAt];
+  List<GeneratedColumn> get $columns => [
+    id,
+    deviceId,
+    title,
+    coverPhotoPath,
+    createdAt,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -400,6 +417,15 @@ class $GuidesTable extends Guides with TableInfo<$GuidesTable, Guide> {
     } else if (isInserting) {
       context.missing(_titleMeta);
     }
+    if (data.containsKey('cover_photo_path')) {
+      context.handle(
+        _coverPhotoPathMeta,
+        coverPhotoPath.isAcceptableOrUnknown(
+          data['cover_photo_path']!,
+          _coverPhotoPathMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -427,6 +453,10 @@ class $GuidesTable extends Guides with TableInfo<$GuidesTable, Guide> {
         DriftSqlType.string,
         data['${effectivePrefix}title'],
       )!,
+      coverPhotoPath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}cover_photo_path'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -444,11 +474,13 @@ class Guide extends DataClass implements Insertable<Guide> {
   final int id;
   final int deviceId;
   final String title;
+  final String? coverPhotoPath;
   final DateTime createdAt;
   const Guide({
     required this.id,
     required this.deviceId,
     required this.title,
+    this.coverPhotoPath,
     required this.createdAt,
   });
   @override
@@ -457,6 +489,9 @@ class Guide extends DataClass implements Insertable<Guide> {
     map['id'] = Variable<int>(id);
     map['device_id'] = Variable<int>(deviceId);
     map['title'] = Variable<String>(title);
+    if (!nullToAbsent || coverPhotoPath != null) {
+      map['cover_photo_path'] = Variable<String>(coverPhotoPath);
+    }
     map['created_at'] = Variable<DateTime>(createdAt);
     return map;
   }
@@ -466,6 +501,9 @@ class Guide extends DataClass implements Insertable<Guide> {
       id: Value(id),
       deviceId: Value(deviceId),
       title: Value(title),
+      coverPhotoPath: coverPhotoPath == null && nullToAbsent
+          ? const Value.absent()
+          : Value(coverPhotoPath),
       createdAt: Value(createdAt),
     );
   }
@@ -479,6 +517,7 @@ class Guide extends DataClass implements Insertable<Guide> {
       id: serializer.fromJson<int>(json['id']),
       deviceId: serializer.fromJson<int>(json['deviceId']),
       title: serializer.fromJson<String>(json['title']),
+      coverPhotoPath: serializer.fromJson<String?>(json['coverPhotoPath']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
     );
   }
@@ -489,6 +528,7 @@ class Guide extends DataClass implements Insertable<Guide> {
       'id': serializer.toJson<int>(id),
       'deviceId': serializer.toJson<int>(deviceId),
       'title': serializer.toJson<String>(title),
+      'coverPhotoPath': serializer.toJson<String?>(coverPhotoPath),
       'createdAt': serializer.toJson<DateTime>(createdAt),
     };
   }
@@ -497,11 +537,15 @@ class Guide extends DataClass implements Insertable<Guide> {
     int? id,
     int? deviceId,
     String? title,
+    Value<String?> coverPhotoPath = const Value.absent(),
     DateTime? createdAt,
   }) => Guide(
     id: id ?? this.id,
     deviceId: deviceId ?? this.deviceId,
     title: title ?? this.title,
+    coverPhotoPath: coverPhotoPath.present
+        ? coverPhotoPath.value
+        : this.coverPhotoPath,
     createdAt: createdAt ?? this.createdAt,
   );
   Guide copyWithCompanion(GuidesCompanion data) {
@@ -509,6 +553,9 @@ class Guide extends DataClass implements Insertable<Guide> {
       id: data.id.present ? data.id.value : this.id,
       deviceId: data.deviceId.present ? data.deviceId.value : this.deviceId,
       title: data.title.present ? data.title.value : this.title,
+      coverPhotoPath: data.coverPhotoPath.present
+          ? data.coverPhotoPath.value
+          : this.coverPhotoPath,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
     );
   }
@@ -519,13 +566,15 @@ class Guide extends DataClass implements Insertable<Guide> {
           ..write('id: $id, ')
           ..write('deviceId: $deviceId, ')
           ..write('title: $title, ')
+          ..write('coverPhotoPath: $coverPhotoPath, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, deviceId, title, createdAt);
+  int get hashCode =>
+      Object.hash(id, deviceId, title, coverPhotoPath, createdAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -533,6 +582,7 @@ class Guide extends DataClass implements Insertable<Guide> {
           other.id == this.id &&
           other.deviceId == this.deviceId &&
           other.title == this.title &&
+          other.coverPhotoPath == this.coverPhotoPath &&
           other.createdAt == this.createdAt);
 }
 
@@ -540,17 +590,20 @@ class GuidesCompanion extends UpdateCompanion<Guide> {
   final Value<int> id;
   final Value<int> deviceId;
   final Value<String> title;
+  final Value<String?> coverPhotoPath;
   final Value<DateTime> createdAt;
   const GuidesCompanion({
     this.id = const Value.absent(),
     this.deviceId = const Value.absent(),
     this.title = const Value.absent(),
+    this.coverPhotoPath = const Value.absent(),
     this.createdAt = const Value.absent(),
   });
   GuidesCompanion.insert({
     this.id = const Value.absent(),
     required int deviceId,
     required String title,
+    this.coverPhotoPath = const Value.absent(),
     this.createdAt = const Value.absent(),
   }) : deviceId = Value(deviceId),
        title = Value(title);
@@ -558,12 +611,14 @@ class GuidesCompanion extends UpdateCompanion<Guide> {
     Expression<int>? id,
     Expression<int>? deviceId,
     Expression<String>? title,
+    Expression<String>? coverPhotoPath,
     Expression<DateTime>? createdAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (deviceId != null) 'device_id': deviceId,
       if (title != null) 'title': title,
+      if (coverPhotoPath != null) 'cover_photo_path': coverPhotoPath,
       if (createdAt != null) 'created_at': createdAt,
     });
   }
@@ -572,12 +627,14 @@ class GuidesCompanion extends UpdateCompanion<Guide> {
     Value<int>? id,
     Value<int>? deviceId,
     Value<String>? title,
+    Value<String?>? coverPhotoPath,
     Value<DateTime>? createdAt,
   }) {
     return GuidesCompanion(
       id: id ?? this.id,
       deviceId: deviceId ?? this.deviceId,
       title: title ?? this.title,
+      coverPhotoPath: coverPhotoPath ?? this.coverPhotoPath,
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -594,6 +651,9 @@ class GuidesCompanion extends UpdateCompanion<Guide> {
     if (title.present) {
       map['title'] = Variable<String>(title.value);
     }
+    if (coverPhotoPath.present) {
+      map['cover_photo_path'] = Variable<String>(coverPhotoPath.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -606,6 +666,7 @@ class GuidesCompanion extends UpdateCompanion<Guide> {
           ..write('id: $id, ')
           ..write('deviceId: $deviceId, ')
           ..write('title: $title, ')
+          ..write('coverPhotoPath: $coverPhotoPath, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
@@ -670,6 +731,21 @@ class $StepsTable extends Steps with TableInfo<$StepsTable, Step> {
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _instructionText2Meta = const VerificationMeta(
+    'instructionText2',
+  );
+  @override
+  late final GeneratedColumn<String> instructionText2 = GeneratedColumn<String>(
+    'instruction_text2',
+    aliasedName,
+    true,
+    additionalChecks: GeneratedColumn.checkTextLength(
+      minTextLength: 0,
+      maxTextLength: 300,
+    ),
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _photoPathMeta = const VerificationMeta(
     'photoPath',
   );
@@ -699,6 +775,7 @@ class $StepsTable extends Steps with TableInfo<$StepsTable, Step> {
     guideId,
     stepIndex,
     instructionText,
+    instructionText2,
     photoPath,
     createdAt,
   ];
@@ -744,6 +821,15 @@ class $StepsTable extends Steps with TableInfo<$StepsTable, Step> {
     } else if (isInserting) {
       context.missing(_instructionTextMeta);
     }
+    if (data.containsKey('instruction_text2')) {
+      context.handle(
+        _instructionText2Meta,
+        instructionText2.isAcceptableOrUnknown(
+          data['instruction_text2']!,
+          _instructionText2Meta,
+        ),
+      );
+    }
     if (data.containsKey('photo_path')) {
       context.handle(
         _photoPathMeta,
@@ -781,6 +867,10 @@ class $StepsTable extends Steps with TableInfo<$StepsTable, Step> {
         DriftSqlType.string,
         data['${effectivePrefix}instruction_text'],
       )!,
+      instructionText2: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}instruction_text2'],
+      ),
       photoPath: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}photo_path'],
@@ -802,7 +892,12 @@ class Step extends DataClass implements Insertable<Step> {
   final int id;
   final int guideId;
   final int stepIndex;
+
+  /// Text shown above image 1.
   final String instructionText;
+
+  /// Optional text shown above image 2.
+  final String? instructionText2;
   final String? photoPath;
   final DateTime createdAt;
   const Step({
@@ -810,6 +905,7 @@ class Step extends DataClass implements Insertable<Step> {
     required this.guideId,
     required this.stepIndex,
     required this.instructionText,
+    this.instructionText2,
     this.photoPath,
     required this.createdAt,
   });
@@ -820,6 +916,9 @@ class Step extends DataClass implements Insertable<Step> {
     map['guide_id'] = Variable<int>(guideId);
     map['step_index'] = Variable<int>(stepIndex);
     map['instruction_text'] = Variable<String>(instructionText);
+    if (!nullToAbsent || instructionText2 != null) {
+      map['instruction_text2'] = Variable<String>(instructionText2);
+    }
     if (!nullToAbsent || photoPath != null) {
       map['photo_path'] = Variable<String>(photoPath);
     }
@@ -833,6 +932,9 @@ class Step extends DataClass implements Insertable<Step> {
       guideId: Value(guideId),
       stepIndex: Value(stepIndex),
       instructionText: Value(instructionText),
+      instructionText2: instructionText2 == null && nullToAbsent
+          ? const Value.absent()
+          : Value(instructionText2),
       photoPath: photoPath == null && nullToAbsent
           ? const Value.absent()
           : Value(photoPath),
@@ -850,6 +952,7 @@ class Step extends DataClass implements Insertable<Step> {
       guideId: serializer.fromJson<int>(json['guideId']),
       stepIndex: serializer.fromJson<int>(json['stepIndex']),
       instructionText: serializer.fromJson<String>(json['instructionText']),
+      instructionText2: serializer.fromJson<String?>(json['instructionText2']),
       photoPath: serializer.fromJson<String?>(json['photoPath']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
     );
@@ -862,6 +965,7 @@ class Step extends DataClass implements Insertable<Step> {
       'guideId': serializer.toJson<int>(guideId),
       'stepIndex': serializer.toJson<int>(stepIndex),
       'instructionText': serializer.toJson<String>(instructionText),
+      'instructionText2': serializer.toJson<String?>(instructionText2),
       'photoPath': serializer.toJson<String?>(photoPath),
       'createdAt': serializer.toJson<DateTime>(createdAt),
     };
@@ -872,6 +976,7 @@ class Step extends DataClass implements Insertable<Step> {
     int? guideId,
     int? stepIndex,
     String? instructionText,
+    Value<String?> instructionText2 = const Value.absent(),
     Value<String?> photoPath = const Value.absent(),
     DateTime? createdAt,
   }) => Step(
@@ -879,6 +984,9 @@ class Step extends DataClass implements Insertable<Step> {
     guideId: guideId ?? this.guideId,
     stepIndex: stepIndex ?? this.stepIndex,
     instructionText: instructionText ?? this.instructionText,
+    instructionText2: instructionText2.present
+        ? instructionText2.value
+        : this.instructionText2,
     photoPath: photoPath.present ? photoPath.value : this.photoPath,
     createdAt: createdAt ?? this.createdAt,
   );
@@ -890,6 +998,9 @@ class Step extends DataClass implements Insertable<Step> {
       instructionText: data.instructionText.present
           ? data.instructionText.value
           : this.instructionText,
+      instructionText2: data.instructionText2.present
+          ? data.instructionText2.value
+          : this.instructionText2,
       photoPath: data.photoPath.present ? data.photoPath.value : this.photoPath,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
     );
@@ -902,6 +1013,7 @@ class Step extends DataClass implements Insertable<Step> {
           ..write('guideId: $guideId, ')
           ..write('stepIndex: $stepIndex, ')
           ..write('instructionText: $instructionText, ')
+          ..write('instructionText2: $instructionText2, ')
           ..write('photoPath: $photoPath, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
@@ -914,6 +1026,7 @@ class Step extends DataClass implements Insertable<Step> {
     guideId,
     stepIndex,
     instructionText,
+    instructionText2,
     photoPath,
     createdAt,
   );
@@ -925,6 +1038,7 @@ class Step extends DataClass implements Insertable<Step> {
           other.guideId == this.guideId &&
           other.stepIndex == this.stepIndex &&
           other.instructionText == this.instructionText &&
+          other.instructionText2 == this.instructionText2 &&
           other.photoPath == this.photoPath &&
           other.createdAt == this.createdAt);
 }
@@ -934,6 +1048,7 @@ class StepsCompanion extends UpdateCompanion<Step> {
   final Value<int> guideId;
   final Value<int> stepIndex;
   final Value<String> instructionText;
+  final Value<String?> instructionText2;
   final Value<String?> photoPath;
   final Value<DateTime> createdAt;
   const StepsCompanion({
@@ -941,6 +1056,7 @@ class StepsCompanion extends UpdateCompanion<Step> {
     this.guideId = const Value.absent(),
     this.stepIndex = const Value.absent(),
     this.instructionText = const Value.absent(),
+    this.instructionText2 = const Value.absent(),
     this.photoPath = const Value.absent(),
     this.createdAt = const Value.absent(),
   });
@@ -949,6 +1065,7 @@ class StepsCompanion extends UpdateCompanion<Step> {
     required int guideId,
     required int stepIndex,
     required String instructionText,
+    this.instructionText2 = const Value.absent(),
     this.photoPath = const Value.absent(),
     this.createdAt = const Value.absent(),
   }) : guideId = Value(guideId),
@@ -959,6 +1076,7 @@ class StepsCompanion extends UpdateCompanion<Step> {
     Expression<int>? guideId,
     Expression<int>? stepIndex,
     Expression<String>? instructionText,
+    Expression<String>? instructionText2,
     Expression<String>? photoPath,
     Expression<DateTime>? createdAt,
   }) {
@@ -967,6 +1085,7 @@ class StepsCompanion extends UpdateCompanion<Step> {
       if (guideId != null) 'guide_id': guideId,
       if (stepIndex != null) 'step_index': stepIndex,
       if (instructionText != null) 'instruction_text': instructionText,
+      if (instructionText2 != null) 'instruction_text2': instructionText2,
       if (photoPath != null) 'photo_path': photoPath,
       if (createdAt != null) 'created_at': createdAt,
     });
@@ -977,6 +1096,7 @@ class StepsCompanion extends UpdateCompanion<Step> {
     Value<int>? guideId,
     Value<int>? stepIndex,
     Value<String>? instructionText,
+    Value<String?>? instructionText2,
     Value<String?>? photoPath,
     Value<DateTime>? createdAt,
   }) {
@@ -985,6 +1105,7 @@ class StepsCompanion extends UpdateCompanion<Step> {
       guideId: guideId ?? this.guideId,
       stepIndex: stepIndex ?? this.stepIndex,
       instructionText: instructionText ?? this.instructionText,
+      instructionText2: instructionText2 ?? this.instructionText2,
       photoPath: photoPath ?? this.photoPath,
       createdAt: createdAt ?? this.createdAt,
     );
@@ -1005,6 +1126,9 @@ class StepsCompanion extends UpdateCompanion<Step> {
     if (instructionText.present) {
       map['instruction_text'] = Variable<String>(instructionText.value);
     }
+    if (instructionText2.present) {
+      map['instruction_text2'] = Variable<String>(instructionText2.value);
+    }
     if (photoPath.present) {
       map['photo_path'] = Variable<String>(photoPath.value);
     }
@@ -1021,6 +1145,7 @@ class StepsCompanion extends UpdateCompanion<Step> {
           ..write('guideId: $guideId, ')
           ..write('stepIndex: $stepIndex, ')
           ..write('instructionText: $instructionText, ')
+          ..write('instructionText2: $instructionText2, ')
           ..write('photoPath: $photoPath, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
@@ -1332,17 +1457,11 @@ class StepAnnotation extends DataClass implements Insertable<StepAnnotation> {
 
   /// 0 = yellow, 1 = red, 2 = blue
   final int color;
-
-  /// Relative coords 0..1 (same idea as before)
   final double x;
   final double y;
   final double w;
   final double h;
-
-  /// For kind=text (renamed from `text` -> `label` to avoid drift analyzer crash)
   final String? label;
-
-  /// Optional: simple ordering if needed later
   final int sortOrder;
   final DateTime updatedAt;
   const StepAnnotation({
@@ -2001,6 +2120,7 @@ typedef $$GuidesTableCreateCompanionBuilder =
       Value<int> id,
       required int deviceId,
       required String title,
+      Value<String?> coverPhotoPath,
       Value<DateTime> createdAt,
     });
 typedef $$GuidesTableUpdateCompanionBuilder =
@@ -2008,6 +2128,7 @@ typedef $$GuidesTableUpdateCompanionBuilder =
       Value<int> id,
       Value<int> deviceId,
       Value<String> title,
+      Value<String?> coverPhotoPath,
       Value<DateTime> createdAt,
     });
 
@@ -2068,6 +2189,11 @@ class $$GuidesTableFilterComposer
 
   ColumnFilters<String> get title => $composableBuilder(
     column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get coverPhotoPath => $composableBuilder(
+    column: $table.coverPhotoPath,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2144,6 +2270,11 @@ class $$GuidesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get coverPhotoPath => $composableBuilder(
+    column: $table.coverPhotoPath,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -2187,6 +2318,11 @@ class $$GuidesTableAnnotationComposer
 
   GeneratedColumn<String> get title =>
       $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get coverPhotoPath => $composableBuilder(
+    column: $table.coverPhotoPath,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -2271,11 +2407,13 @@ class $$GuidesTableTableManager
                 Value<int> id = const Value.absent(),
                 Value<int> deviceId = const Value.absent(),
                 Value<String> title = const Value.absent(),
+                Value<String?> coverPhotoPath = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
               }) => GuidesCompanion(
                 id: id,
                 deviceId: deviceId,
                 title: title,
+                coverPhotoPath: coverPhotoPath,
                 createdAt: createdAt,
               ),
           createCompanionCallback:
@@ -2283,11 +2421,13 @@ class $$GuidesTableTableManager
                 Value<int> id = const Value.absent(),
                 required int deviceId,
                 required String title,
+                Value<String?> coverPhotoPath = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
               }) => GuidesCompanion.insert(
                 id: id,
                 deviceId: deviceId,
                 title: title,
+                coverPhotoPath: coverPhotoPath,
                 createdAt: createdAt,
               ),
           withReferenceMapper: (p0) => p0
@@ -2374,6 +2514,7 @@ typedef $$StepsTableCreateCompanionBuilder =
       required int guideId,
       required int stepIndex,
       required String instructionText,
+      Value<String?> instructionText2,
       Value<String?> photoPath,
       Value<DateTime> createdAt,
     });
@@ -2383,6 +2524,7 @@ typedef $$StepsTableUpdateCompanionBuilder =
       Value<int> guideId,
       Value<int> stepIndex,
       Value<String> instructionText,
+      Value<String?> instructionText2,
       Value<String?> photoPath,
       Value<DateTime> createdAt,
     });
@@ -2450,6 +2592,11 @@ class $$StepsTableFilterComposer extends Composer<_$AppDatabase, $StepsTable> {
 
   ColumnFilters<String> get instructionText => $composableBuilder(
     column: $table.instructionText,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get instructionText2 => $composableBuilder(
+    column: $table.instructionText2,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2536,6 +2683,11 @@ class $$StepsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get instructionText2 => $composableBuilder(
+    column: $table.instructionText2,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get photoPath => $composableBuilder(
     column: $table.photoPath,
     builder: (column) => ColumnOrderings(column),
@@ -2587,6 +2739,11 @@ class $$StepsTableAnnotationComposer
 
   GeneratedColumn<String> get instructionText => $composableBuilder(
     column: $table.instructionText,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get instructionText2 => $composableBuilder(
+    column: $table.instructionText2,
     builder: (column) => column,
   );
 
@@ -2677,6 +2834,7 @@ class $$StepsTableTableManager
                 Value<int> guideId = const Value.absent(),
                 Value<int> stepIndex = const Value.absent(),
                 Value<String> instructionText = const Value.absent(),
+                Value<String?> instructionText2 = const Value.absent(),
                 Value<String?> photoPath = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
               }) => StepsCompanion(
@@ -2684,6 +2842,7 @@ class $$StepsTableTableManager
                 guideId: guideId,
                 stepIndex: stepIndex,
                 instructionText: instructionText,
+                instructionText2: instructionText2,
                 photoPath: photoPath,
                 createdAt: createdAt,
               ),
@@ -2693,6 +2852,7 @@ class $$StepsTableTableManager
                 required int guideId,
                 required int stepIndex,
                 required String instructionText,
+                Value<String?> instructionText2 = const Value.absent(),
                 Value<String?> photoPath = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
               }) => StepsCompanion.insert(
@@ -2700,6 +2860,7 @@ class $$StepsTableTableManager
                 guideId: guideId,
                 stepIndex: stepIndex,
                 instructionText: instructionText,
+                instructionText2: instructionText2,
                 photoPath: photoPath,
                 createdAt: createdAt,
               ),

@@ -21,10 +21,12 @@ class CaregiverGuidesApp extends ConsumerWidget {
           data: mq.copyWith(
             textScaleFactor: (mq.textScaleFactor * 1.08).clamp(1.0, 1.3),
           ),
-          child: child ?? const SizedBox.shrink(),
+          child: SafeArea(
+            top: false,
+            child: child ?? const SizedBox.shrink(),
+          ),
         );
       },
-
     );
   }
 }

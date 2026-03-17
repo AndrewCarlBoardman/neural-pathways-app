@@ -502,8 +502,8 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     final s = _sceneSize;
     if (s == null) return;
 
-    const defaultW = 0.38;
-    const defaultH = 0.14;
+    const defaultW = 0.26;
+    const defaultH = 0.11;
 
     double x = scenePoint.dx / s.width - defaultW / 2;
     double y = scenePoint.dy / s.height - defaultH / 2;
@@ -513,17 +513,20 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
 
     final packed = _TextColorPack.pack(border: _textBorder, bg: _textBg, text: _textFg);
 
-    final draft = AnnotationDraft(
-      id: null,
-      kind: 1,
-      shapeType: null,
-      color: packed,
-      x: x,
-      y: y,
-      w: defaultW,
-      h: defaultH,
-      label: 'Label',
-      sortOrder: _items.length,
+    final draft = _fitTextDraftToLabel(
+      AnnotationDraft(
+        id: null,
+        kind: 1,
+        shapeType: null,
+        color: packed,
+        x: x,
+        y: y,
+        w: defaultW,
+        h: defaultH,
+        label: 'Label',
+        sortOrder: _items.length,
+      ),
+      'Label',
     );
 
     setState(() {
@@ -987,6 +990,54 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     });
   }
 
+
+  AnnotationDraft _fitTextDraftToLabel(AnnotationDraft d, String rawLabel) {
+    final scene = _sceneSize;
+    final label = rawLabel.trim().isEmpty ? 'Label' : rawLabel.trim();
+    if (scene == null) {
+      return d.copyWith(label: label);
+    }
+
+    final maxWidthPx = scene.width * 0.42;
+    const minWidthPx = 72.0;
+    const minHeightPx = 44.0;
+    const padX = 18.0;
+    const padY = 12.0;
+
+    final tp = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: const TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+      maxLines: 5,
+    )..layout(maxWidth: maxWidthPx - padX * 2);
+
+    final widthPx = (tp.width + padX * 2).clamp(minWidthPx, maxWidthPx);
+    final heightPx = (tp.height + padY * 2).clamp(minHeightPx, scene.height * 0.26);
+
+    final newW = widthPx / scene.width;
+    final newH = heightPx / scene.height;
+
+    final centerX = d.x + d.w / 2;
+    final centerY = d.y + d.h / 2;
+
+    final newX = (centerX - newW / 2).clamp(0.0, 1.0 - newW);
+    final newY = (centerY - newH / 2).clamp(0.0, 1.0 - newH);
+
+    return d.copyWith(
+      label: label,
+      x: newX,
+      y: newY,
+      w: newW,
+      h: newH,
+    );
+  }
+
   void _applyTextLabel() {
     final idx = _selectedIndex;
     if (idx == null) return;
@@ -994,7 +1045,7 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     if (!d.isText) return;
 
     setState(() {
-      _items[idx] = d.copyWith(label: _textController.text.trim());
+      _items[idx] = _fitTextDraftToLabel(d, _textController.text);
     });
   }
 
