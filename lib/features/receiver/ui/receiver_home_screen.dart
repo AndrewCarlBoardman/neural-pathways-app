@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -9,55 +8,75 @@ class ReceiverHomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Caregiver Guides'),
-        centerTitle: true,
       ),
-      body: Column(
-        children: [
-          const Spacer(),
-
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 32),
-            child: Text(
-              'Tap here to see your step-by-step guides',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 18),
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: SizedBox(
-              width: double.infinity,
-              height: 120,
-              child: ElevatedButton(
-                onPressed: () {
-                  context.go('/receiver/guides');
-                },
-                style: ElevatedButton.styleFrom(
-                  textStyle: const TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Welcome',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Open your guides and follow each step one at a time.',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              SizedBox(
+                height: 136,
+                child: ElevatedButton(
+                  onPressed: () => context.go('/receiver/guides'),
+                  child: const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.play_circle_fill_rounded, size: 42),
+                      SizedBox(height: 10),
+                      Text(
+                        'View Guides',
+                        style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
+                      ),
+                    ],
                   ),
                 ),
-                child: const Text('View Guides'),
               ),
-            ),
+              const SizedBox(height: 18),
+              Text(
+                'Tap the big button above to begin.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const Spacer(),
+              const CaregiverEntryButton(),
+            ],
           ),
-
-          const Spacer(),
-
-          const CaregiverEntryButton(),
-
-          const SizedBox(height: 30),
-        ],
+        ),
       ),
     );
   }

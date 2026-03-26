@@ -15,18 +15,51 @@ class HighlightOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return IgnorePointer(
-      child: CustomPaint(
-        painter: _AnnotationsPainter(annotations),
-        size: Size.infinite,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = Size(constraints.maxWidth, constraints.maxHeight);
+          final square = _squareBounds(size);
+
+          return Stack(
+            children: [
+              for (final a in annotations)
+                if (a.kind == 0 && (a.shapeType ?? 0) == 2)
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: _ArrowPainter(
+                        annotation: a,
+                        square: square,
+                      ),
+                    ),
+                  )
+                else
+                  _OverlayItem(
+                    annotation: a,
+                    square: square,
+                  ),
+            ],
+          );
+        },
       ),
     );
   }
+
+  static Rect _squareBounds(Size size) {
+    final side = math.min(size.width, size.height);
+    final left = (size.width - side) / 2;
+    final top = (size.height - side) / 2;
+    return Rect.fromLTWH(left, top, side, side);
+  }
 }
 
-class _AnnotationsPainter extends CustomPainter {
-  final List<StepAnnotation> anns;
+class _OverlayItem extends StatelessWidget {
+  final StepAnnotation annotation;
+  final Rect square;
 
-  _AnnotationsPainter(this.anns);
+  const _OverlayItem({
+    required this.annotation,
+    required this.square,
+  });
 
   Color _paletteColor(int idx) {
     switch (idx.clamp(0, 4)) {
@@ -55,22 +88,28 @@ class _AnnotationsPainter extends CustomPainter {
     );
   }
 
-  ({int border, int bg, int text}) _unpackTextColor(int packed) {
+  ({int border, int bg, int text, int size}) _unpackTextColor(int packed) {
     final border = packed % 10;
     final bg = (packed ~/ 10) % 10;
     final text = (packed ~/ 100) % 10;
+    final size = (packed ~/ 1000) % 10;
     return (
     border: border.clamp(0, 4),
     bg: bg.clamp(0, 4),
     text: text.clamp(0, 4),
+    size: size.clamp(0, 2),
     );
   }
 
-  Rect _squareBounds(Size size) {
-    final side = math.min(size.width, size.height);
-    final left = (size.width - side) / 2;
-    final top = (size.height - side) / 2;
-    return Rect.fromLTWH(left, top, side, side);
+  double _fontSizeForPacked(int size) {
+    switch (size) {
+      case 2:
+        return 26.0;
+      case 1:
+        return 20.0;
+      default:
+        return 15.0;
+    }
   }
 
   Rect _normRectToSquare(Rect square, StepAnnotation a) {
@@ -82,28 +121,119 @@ class _AnnotationsPainter extends CustomPainter {
     );
   }
 
-  Rect _circleRect(Rect rect) {
-    final d = math.min(rect.width, rect.height);
-    return Rect.fromCenter(center: rect.center, width: d, height: d);
+  @override
+  Widget build(BuildContext context) {
+    final rect = _normRectToSquare(square, annotation);
+
+    if (annotation.kind == 0) {
+      final colors = _unpackShapeColor(annotation.color);
+      final borderColor = _paletteColor(colors.border).withOpacity(0.95);
+      final fillColor = _paletteColor(colors.fill).withOpacity(0.18);
+      final isCircle = (annotation.shapeType ?? 0) == 1;
+
+      return Positioned.fromRect(
+        rect: rect,
+        child: Container(
+          decoration: BoxDecoration(
+            color: fillColor,
+            border: Border.all(
+              color: borderColor,
+              width: 3,
+            ),
+            shape: isCircle ? BoxShape.circle : BoxShape.rectangle,
+            borderRadius: isCircle ? null : BorderRadius.circular(10),
+          ),
+        ),
+      );
+    }
+
+    final label = (annotation.label ?? '').trim();
+    if (label.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final colors = _unpackTextColor(annotation.color);
+    final borderColor = _paletteColor(colors.border).withOpacity(0.95);
+    final bgColor = _paletteColor(colors.bg).withOpacity(0.60);
+    final textColor = _paletteColor(colors.text);
+    final fontSize = _fontSizeForPacked(colors.size);
+
+    return Positioned.fromRect(
+      rect: rect,
+      child: Container(
+        decoration: BoxDecoration(
+          color: bgColor,
+          border: Border.all(
+            color: borderColor,
+            width: 3,
+          ),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        alignment: Alignment.center,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: fontSize,
+                fontWeight: FontWeight.w800,
+                color: textColor,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ArrowPainter extends CustomPainter {
+  final StepAnnotation annotation;
+  final Rect square;
+
+  const _ArrowPainter({
+    required this.annotation,
+    required this.square,
+  });
+
+  Color _paletteColor(int idx) {
+    switch (idx.clamp(0, 4)) {
+      case 1:
+        return Colors.red;
+      case 2:
+        return Colors.blue;
+      case 3:
+        return Colors.white;
+      case 4:
+        return Colors.black;
+      default:
+        return Colors.yellow;
+    }
   }
 
-  Offset _normPointToSquare(Rect square, double x, double y) {
+  Offset _normPointToSquare(double x, double y) {
     return Offset(
       square.left + (x * square.width),
       square.top + (y * square.height),
     );
   }
 
-  double _shapeStroke(double side) => (side * 0.0076).clamp(2.0, 3.0);
   double _arrowStroke(double side) => (side * 0.0080).clamp(2.2, 3.2);
   double _arrowHead(double side) => (side * 0.040).clamp(10.0, 16.0);
 
-  void _drawArrow(Canvas canvas, Rect square, StepAnnotation a) {
-    final tip = _normPointToSquare(square, a.x, a.y);
-    final tail = _normPointToSquare(square, a.x + a.w, a.y + a.h);
+  @override
+  void paint(Canvas canvas, Size size) {
+    final tip = _normPointToSquare(annotation.x, annotation.y);
+    final tail = _normPointToSquare(
+      annotation.x + annotation.w,
+      annotation.y + annotation.h,
+    );
 
     final paint = Paint()
-      ..color = _paletteColor(a.color).withOpacity(0.95)
+      ..color = _paletteColor(annotation.color).withOpacity(0.95)
       ..strokeWidth = _arrowStroke(square.width)
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
@@ -133,150 +263,8 @@ class _AnnotationsPainter extends CustomPainter {
     canvas.drawLine(tip, tip - right * headLen, paint);
   }
 
-  TextPainter _fitTextPainter({
-    required String label,
-    required Color textColor,
-    required double baseSize,
-    required double maxWidth,
-    required bool singleWord,
-  }) {
-    double fittedSize = baseSize;
-
-    if (singleWord) {
-      final natural = TextPainter(
-        text: TextSpan(
-          text: label,
-          style: TextStyle(
-            fontSize: baseSize,
-            fontWeight: FontWeight.w800,
-            color: textColor,
-          ),
-        ),
-        textAlign: TextAlign.center,
-        textDirection: TextDirection.ltr,
-        maxLines: 1,
-      )..layout(minWidth: 0, maxWidth: 10000);
-
-      if (natural.width > maxWidth && natural.width > 0) {
-        fittedSize = (baseSize * (maxWidth / natural.width)).clamp(8.0, baseSize);
-      }
-    }
-
-    final painter = TextPainter(
-      text: TextSpan(
-        text: label,
-        style: TextStyle(
-          fontSize: fittedSize,
-          fontWeight: FontWeight.w800,
-          color: textColor,
-        ),
-      ),
-      textAlign: TextAlign.center,
-      textDirection: TextDirection.ltr,
-      maxLines: singleWord ? 1 : 5,
-    )..layout(maxWidth: maxWidth);
-
-    return painter;
-  }
-
   @override
-  void paint(Canvas canvas, Size size) {
-    final square = _squareBounds(size);
-    final shapeStroke = _shapeStroke(square.width);
-    final radius = Radius.circular((square.width * 0.03).clamp(8.0, 10.0));
-
-    for (final a in anns) {
-      if (a.kind == 0 && (a.shapeType ?? 0) == 2) {
-        _drawArrow(canvas, square, a);
-        continue;
-      }
-
-      final rect = _normRectToSquare(square, a);
-
-      if (a.kind == 0) {
-        final colors = _unpackShapeColor(a.color);
-        final borderColor = _paletteColor(colors.border);
-        final fillColor = _paletteColor(colors.fill);
-
-        final fill = Paint()
-          ..color = fillColor.withOpacity(0.18)
-          ..isAntiAlias = true;
-
-        final stroke = Paint()
-          ..color = borderColor.withOpacity(0.95)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = shapeStroke
-          ..isAntiAlias = true;
-
-        final shapeType = a.shapeType ?? 0;
-        if (shapeType == 1) {
-          final circle = _circleRect(rect);
-          canvas.drawOval(circle, fill);
-          canvas.drawOval(circle, stroke);
-        } else {
-          final rrect = RRect.fromRectAndRadius(rect, radius);
-          canvas.drawRRect(rrect, fill);
-          canvas.drawRRect(rrect, stroke);
-        }
-        continue;
-      }
-
-      final label = (a.label ?? '').trim();
-      if (label.isEmpty) continue;
-
-      final colors = _unpackTextColor(a.color);
-      final borderColor = _paletteColor(colors.border);
-      final bgColor = _paletteColor(colors.bg);
-      final textColor = _paletteColor(colors.text);
-
-      final padX = (square.width * 0.026).clamp(8.0, 12.0);
-      final padY = (square.width * 0.018).clamp(5.0, 8.0);
-
-      final isSingleWord = !label.contains(RegExp(r'\s'));
-      final maxWidth = math.max(20.0, rect.width - (padX * 2));
-      final baseSize = (math.min(rect.width, rect.height) * 0.42).clamp(10.0, 18.0);
-
-      final fitted = _fitTextPainter(
-        label: label,
-        textColor: textColor,
-        baseSize: baseSize,
-        maxWidth: maxWidth,
-        singleWord: isSingleWord,
-      );
-
-      var boxHeight = math.max(rect.height, fitted.height + padY * 2);
-      var top = rect.center.dy - boxHeight / 2;
-      if (top < square.top) top = square.top;
-      if (top + boxHeight > square.bottom) top = square.bottom - boxHeight;
-
-      final boxRect = Rect.fromLTWH(rect.left, top, rect.width, boxHeight);
-      final bg = RRect.fromRectAndRadius(boxRect, radius);
-
-      canvas.drawRRect(
-        bg,
-        Paint()
-          ..color = bgColor.withOpacity(0.60)
-          ..isAntiAlias = true,
-      );
-
-      canvas.drawRRect(
-        bg,
-        Paint()
-          ..color = borderColor.withOpacity(0.95)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = shapeStroke
-          ..isAntiAlias = true,
-      );
-
-      final offset = Offset(
-        boxRect.center.dx - fitted.width / 2,
-        boxRect.center.dy - fitted.height / 2,
-      );
-
-      fitted.paint(canvas, offset);
-    }
+  bool shouldRepaint(covariant _ArrowPainter oldDelegate) {
+    return oldDelegate.annotation != annotation || oldDelegate.square != square;
   }
-
-  @override
-  bool shouldRepaint(covariant _AnnotationsPainter oldDelegate) => true;
 }

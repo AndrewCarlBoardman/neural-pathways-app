@@ -13,18 +13,18 @@ class CaregiverGuidesApp extends ConsumerWidget {
 
     return MaterialApp.router(
       title: 'Caregiver Guides',
+      debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       routerConfig: router,
       builder: (context, child) {
         final mq = MediaQuery.of(context);
         return MediaQuery(
           data: mq.copyWith(
-            textScaleFactor: (mq.textScaleFactor * 1.08).clamp(1.0, 1.3),
+            textScaler: TextScaler.linear(
+              (mq.textScaler.textScaleFactor * 1.06).clamp(1.0, 1.25),
+            ),
           ),
-          child: SafeArea(
-            top: false,
-            child: child ?? const SizedBox.shrink(),
-          ),
+          child: child ?? const SizedBox.shrink(),
         );
       },
     );

@@ -19,16 +19,16 @@ class ReceiverGuidesListScreen extends ConsumerWidget {
     final result = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Leave User View?'),
-        content: const Text('Return to the main screen.'),
+        title: const Text('Exit guide mode?'),
+        content: const Text('Return to the main Caregiver Guides screen.'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
           FilledButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Stay in guides'),
+          ),
+          TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Leave'),
+            child: const Text('Exit'),
           ),
         ],
       ),
@@ -42,127 +42,125 @@ class ReceiverGuidesListScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final guidesAsync = ref.watch(receiverGuidesProvider);
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Select Guide'),
+        title: const Text('Choose a Guide'),
         actions: [
-          GestureDetector(
-            onLongPress: () => _leaveUserView(context),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
-                  Icon(Icons.exit_to_app, color: Colors.grey),
-                  SizedBox(height: 2),
-                  Text(
-                    'Hold',
-                    style: TextStyle(fontSize: 10, color: Colors.grey),
-                  ),
-                ],
+          PopupMenuButton<String>(
+            tooltip: 'More options',
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              if (value == 'exit') {
+                _leaveUserView(context);
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem<String>(
+                value: 'exit',
+                child: Row(
+                  children: [
+                    Icon(Icons.home_rounded),
+                    SizedBox(width: 10),
+                    Text('Exit guide mode'),
+                  ],
+                ),
               ),
-            ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'receiver_list_home_fab',
-        onPressed: null,
-        label: GestureDetector(
-          onLongPress: () => _leaveUserView(context),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.home),
-              SizedBox(width: 8),
-              Text('Hold for Home'),
             ],
           ),
-        ),
+        ],
       ),
       body: guidesAsync.when(
         data: (guides) {
           if (guides.isEmpty) {
-            return const Center(
+            return Center(
               child: Padding(
-                padding: EdgeInsets.all(24),
+                padding: const EdgeInsets.all(24),
                 child: Text(
-                  'No guides available.',
+                  'No guides available yet.',
                   textAlign: TextAlign.center,
+                  style: theme.textTheme.titleLarge,
                 ),
               ),
             );
           }
 
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-            itemCount: guides.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 16),
-            itemBuilder: (context, i) {
-              final g = guides[i];
+          return SafeArea(
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+              itemCount: guides.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 16),
+              itemBuilder: (context, i) {
+                final guide = guides[i];
 
-              return Material(
-                color: Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(24),
-                elevation: 2,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(24),
-                  onTap: () => context.push('/receiver/guides/${g.id}/play'),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      children: [
-                        _GuideThumbLarge(path: g.coverPhotoPath),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                g.title,
-                                style: const TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w800,
+                return Material(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(28),
+                  elevation: 2,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(28),
+                    onTap: () => context.push('/receiver/guides/${guide.id}/play'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          _GuideThumbLarge(path: guide.coverPhotoPath),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  guide.title,
+                                  style: const TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 8),
-                              const Text(
-                                'Tap to start this guide',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.grey,
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Tap to start this guide',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Container(
-                          width: 56,
-                          height: 56,
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.primaryContainer,
-                            shape: BoxShape.circle,
+                          const SizedBox(width: 12),
+                          Container(
+                            width: 58,
+                            height: 58,
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primaryContainer,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.play_arrow_rounded,
+                              size: 34,
+                              color: theme.colorScheme.onPrimaryContainer,
+                            ),
                           ),
-                          child: Icon(
-                            Icons.play_arrow,
-                            size: 32,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onPrimaryContainer,
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, st) => Center(child: Text('Error: $e')),
+        error: (e, st) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              'Unable to load guides.\n\n$e',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -174,17 +172,17 @@ class _GuideThumbLarge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final borderRadius = BorderRadius.circular(18);
+    final borderRadius = BorderRadius.circular(20);
 
     if (path == null || path!.isEmpty) {
       return Container(
-        width: 92,
-        height: 92,
+        width: 96,
+        height: 96,
         decoration: BoxDecoration(
           borderRadius: borderRadius,
           color: Theme.of(context).colorScheme.surfaceContainerHighest,
         ),
-        child: const Icon(Icons.menu_book, size: 40),
+        child: const Icon(Icons.menu_book_rounded, size: 42),
       );
     }
 
@@ -192,13 +190,13 @@ class _GuideThumbLarge extends StatelessWidget {
 
     if (!file.existsSync()) {
       return Container(
-        width: 92,
-        height: 92,
+        width: 96,
+        height: 96,
         decoration: BoxDecoration(
           borderRadius: borderRadius,
           color: Theme.of(context).colorScheme.surfaceContainerHighest,
         ),
-        child: const Icon(Icons.broken_image, size: 40),
+        child: const Icon(Icons.broken_image_outlined, size: 42),
       );
     }
 
@@ -206,8 +204,8 @@ class _GuideThumbLarge extends StatelessWidget {
       borderRadius: borderRadius,
       child: Image.file(
         file,
-        width: 92,
-        height: 92,
+        width: 96,
+        height: 96,
         fit: BoxFit.cover,
       ),
     );

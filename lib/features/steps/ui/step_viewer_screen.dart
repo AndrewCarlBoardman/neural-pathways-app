@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart' hide Step;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../shared/db/app_db.dart';
 import '../../../shared/db/db_provider.dart';
@@ -102,11 +103,39 @@ class _StepViewerScreenState extends ConsumerState<StepViewerScreen> {
   int index = 0;
 
   void _next(List<Step> steps) {
-    if (index < steps.length - 1) setState(() => index++);
+    if (index < steps.length - 1) {
+      setState(() => index++);
+    }
   }
 
   void _back() {
-    if (index > 0) setState(() => index--);
+    if (index > 0) {
+      setState(() => index--);
+    }
+  }
+
+  Future<void> _leaveUserView() async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Exit guide mode?'),
+        content: const Text('Return to the main Caregiver Guides screen.'),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Stay in guide'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Exit'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true && mounted) {
+      context.go('/receiver');
+    }
   }
 
   List<StepAnnotation> _annsForSlot(List<StepAnnotation> all, int slot) {
@@ -125,32 +154,80 @@ class _StepViewerScreenState extends ConsumerState<StepViewerScreen> {
   @override
   Widget build(BuildContext context) {
     final stepsAsync = ref.watch(stepsForViewerProvider(widget.guideId));
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('User View'),
+        title: const Text('Guide View'),
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'More options',
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              if (value == 'exit') {
+                _leaveUserView();
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem<String>(
+                value: 'exit',
+                child: Row(
+                  children: [
+                    Icon(Icons.home_rounded),
+                    SizedBox(width: 10),
+                    Text('Exit guide mode'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
       body: stepsAsync.when(
         data: (steps) {
-          if (steps.isEmpty) return const Center(child: Text('No steps yet.'));
+          if (steps.isEmpty) {
+            return const Center(child: Text('No steps yet.'));
+          }
 
-          if (index >= steps.length) index = steps.length - 1;
+          if (index >= steps.length) {
+            index = steps.length - 1;
+          }
           final step = steps[index];
-
           final annAsync = ref.watch(annotationsForStepProvider(step.id));
           final payload = _StepImagesPayload.fromPhotoPath(step.photoPath);
+          final progress = (index + 1) / steps.length;
 
           return Column(
             children: [
               Expanded(
                 child: ListView(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                   children: [
-                    Text(
-                      'Step ${step.stepIndex} of ${steps.length}',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Step ${index + 1} of ${steps.length}',
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(999),
+                            child: LinearProgressIndicator(
+                              value: progress,
+                              minHeight: 10,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -189,27 +266,42 @@ class _StepViewerScreenState extends ConsumerState<StepViewerScreen> {
                 ),
               ),
               SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                top: false,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+                  decoration: BoxDecoration(
+                    color: theme.scaffoldBackgroundColor,
+                    boxShadow: const [
+                      BoxShadow(
+                        blurRadius: 10,
+                        offset: Offset(0, -2),
+                        color: Color(0x12000000),
+                      ),
+                    ],
+                  ),
                   child: Row(
                     children: [
                       Expanded(
                         child: FilledButton(
                           onPressed: index == 0 ? null : _back,
                           child: const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 16),
-                            child: Text('Back', style: TextStyle(fontSize: 18)),
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            child: Text('Back', style: TextStyle(fontSize: 20)),
                           ),
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: FilledButton(
-                          onPressed:
-                          index == steps.length - 1 ? null : () => _next(steps),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 16),
-                            child: Text('Next', style: TextStyle(fontSize: 18)),
+                          onPressed: index == steps.length - 1
+                              ? null
+                              : () => _next(steps),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            child: Text(
+                              index == steps.length - 1 ? 'Finished' : 'Next',
+                              style: const TextStyle(fontSize: 20),
+                            ),
                           ),
                         ),
                       ),
@@ -249,42 +341,70 @@ class _StepContentViewer extends StatelessWidget {
     final blocks = <Widget>[];
 
     blocks.add(
-      Text(
-        text1,
-        style: const TextStyle(
-          fontSize: 26,
-          fontWeight: FontWeight.w800,
-          height: 1.25,
-        ),
+      _InstructionCard(
+        text: text1,
+        img: img1,
+        annotations: anns1,
       ),
     );
-    blocks.add(const SizedBox(height: 12));
-    blocks.add(_FramedImageWithOverlay(img: img1, annotations: anns1));
 
     final secondText = (text2 ?? '').trim();
     final hasSecondImage = img2 != null && img2!.path.trim().isNotEmpty;
 
     if (secondText.isNotEmpty || hasSecondImage) {
-      blocks.add(const SizedBox(height: 22));
-      if (secondText.isNotEmpty) {
-        blocks.add(
-          Text(
-            secondText,
-            style: const TextStyle(
-              fontSize: 26,
-              fontWeight: FontWeight.w800,
-              height: 1.25,
-            ),
-          ),
-        );
-        blocks.add(const SizedBox(height: 12));
-      }
-      blocks.add(_FramedImageWithOverlay(img: img2, annotations: anns2));
+      blocks.add(const SizedBox(height: 18));
+      blocks.add(
+        _InstructionCard(
+          text: secondText,
+          img: img2,
+          annotations: anns2,
+        ),
+      );
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: blocks,
+    );
+  }
+}
+
+class _InstructionCard extends StatelessWidget {
+  final String text;
+  final _StepImageRef? img;
+  final List<StepAnnotation> annotations;
+
+  const _InstructionCard({
+    required this.text,
+    required this.img,
+    required this.annotations,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (text.trim().isNotEmpty) ...[
+            Text(
+              text,
+              style: const TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w800,
+                height: 1.25,
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
+          _FramedImageWithOverlay(img: img, annotations: annotations),
+        ],
+      ),
     );
   }
 }
@@ -302,13 +422,13 @@ class _FramedImageWithOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     if (img == null || img!.path.trim().isEmpty) {
       return ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         child: AspectRatio(
           aspectRatio: _frameAspectRatio,
           child: Container(
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(18),
               border: Border.all(color: Theme.of(context).colorScheme.outline),
             ),
             child: const Text('No image'),
@@ -318,12 +438,12 @@ class _FramedImageWithOverlay extends StatelessWidget {
     }
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(18),
       child: AspectRatio(
         aspectRatio: _frameAspectRatio,
         child: Container(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(18),
             border: Border.all(color: Theme.of(context).colorScheme.outline),
           ),
           child: Stack(
@@ -362,18 +482,29 @@ class _TransformedImageFill extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final m = Matrix4.identity()
-          ..translate(tx * constraints.maxWidth, ty * constraints.maxHeight)
-          ..scale(scale, scale);
+        final width = constraints.maxWidth;
+        final height = constraints.maxHeight;
+
+        final matrix = Matrix4.identity()
+          ..translate(tx * width, ty * height)
+          ..scale(scale);
 
         return ClipRect(
           child: Transform(
-            transform: m,
-            child: Image.file(
-              file,
-              fit: BoxFit.cover,
-              width: constraints.maxWidth,
-              height: constraints.maxHeight,
+            alignment: Alignment.center,
+            transform: matrix,
+            child: SizedBox(
+              width: width,
+              height: height,
+              child: Image.file(
+                file,
+                fit: BoxFit.fill,
+                width: width,
+                height: height,
+                errorBuilder: (_, __, ___) => const Center(
+                  child: Text('Unable to load image'),
+                ),
+              ),
             ),
           ),
         );

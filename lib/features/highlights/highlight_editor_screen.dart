@@ -117,24 +117,64 @@ class Palette {
   }
 }
 
+class TextFontSizeOption {
+  static const int small = 0;
+  static const int medium = 1;
+  static const int large = 2;
+
+  static const List<int> values = [large, medium, small];
+
+  static double px(int value) {
+    switch (value) {
+      case large:
+        return 26;
+      case medium:
+        return 20;
+      case small:
+      default:
+        return 15;
+    }
+  }
+
+  static String label(int value) {
+    switch (value) {
+      case large:
+        return 'Large';
+      case medium:
+        return 'Medium';
+      case small:
+      default:
+        return 'Small';
+    }
+  }
+}
+
 class _TextColorPack {
-  // pack three 0..4 values into an int.
-  // border + bg*10 + text*100
-  static int pack({required int border, required int bg, required int text}) {
+  // border + bg*10 + text*100 + size*1000
+  static int pack({
+    required int border,
+    required int bg,
+    required int text,
+    required int size,
+  }) {
     border = border.clamp(0, 4);
     bg = bg.clamp(0, 4);
     text = text.clamp(0, 4);
-    return border + bg * 10 + text * 100;
+    size = size.clamp(0, 2);
+    return border + bg * 10 + text * 100 + size * 1000;
   }
 
-  static ({int border, int bg, int text}) unpack(int packed) {
+  static ({int border, int bg, int text, int size}) unpack(int packed) {
     final border = packed % 10;
     final bg = (packed ~/ 10) % 10;
     final text = (packed ~/ 100) % 10;
+    final size = (packed ~/ 1000) % 10;
+
     return (
     border: border.clamp(0, 4),
     bg: bg.clamp(0, 4),
     text: text.clamp(0, 4),
+    size: size.clamp(0, 2),
     );
   }
 }
@@ -194,7 +234,9 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
   final _sceneKey = GlobalKey();
   final _textController = TextEditingController();
   final FocusNode _textFocus = FocusNode();
+  final ScrollController _imageScrollController = ScrollController();
   bool _isEditingText = false;
+  double _lastKeyboardAdjustment = 0;
 
   Size? _sceneSize;
   List<AnnotationDraft> _items = [];
@@ -213,6 +255,7 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
   int _textBorder = Palette.white;
   int _textBg = Palette.black;
   int _textFg = Palette.white;
+  int _textSize = TextFontSizeOption.small;
 
   // Pointer interaction state
   int? _activePointerId;
@@ -237,6 +280,16 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
   @override
   void initState() {
     super.initState();
+
+    _textFocus.addListener(() {
+      if (!mounted) return;
+      if (!_textFocus.hasFocus && _isEditingText) {
+        _applyTextLabel();
+        setState(() {
+          _isEditingText = false;
+        });
+      }
+    });
 
     _items = widget.existing
         .map(
@@ -274,6 +327,7 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
         _textBorder = t.border;
         _textBg = t.bg;
         _textFg = t.text;
+        _textSize = t.size;
         break;
       }
     }
@@ -284,6 +338,7 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     _tx.dispose();
     _textController.dispose();
     _textFocus.dispose();
+    _imageScrollController.dispose();
     super.dispose();
   }
 
@@ -408,13 +463,26 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
         // Text editing is a *second tap* action:
         // 1st tap selects (so you can change colours).
         // 2nd tap (while already selected) enters edit mode.
-        if (d.isText && alreadySelected && !_isEditingText &&
+        if (d.isText && alreadySelected && _isEditingText) {
+          _applyTextLabel();
+          _isEditingText = false;
+          _textFocus.unfocus();
+          _dragMode = null;
+          _lastScenePoint = null;
+          setState(() {});
+          return;
+        } else if (d.isText &&
+            alreadySelected &&
+            !_isEditingText &&
             (_tool == EditorTool.text || _tool == EditorTool.none)) {
           _isEditingText = true;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) _textFocus.requestFocus();
           });
-          // When editing text, we don't start move/resize until user drags outside the field.
+          _dragMode = null;
+          _lastScenePoint = null;
+          setState(() {});
+          return;
         } else if (!alreadySelected && _isEditingText) {
           _isEditingText = false;
           _textFocus.unfocus();
@@ -426,7 +494,13 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
       }
     }
 
-    // 2) Empty space tap: deselect
+    // 2) While typing, allow the image area to scroll without dismissing the keyboard.
+    if (_isEditingText && _textFocus.hasFocus) {
+      _activePointerId = null;
+      return;
+    }
+
+    // 3) Empty space tap: deselect
     setState(() {
       _selectedIndex = null;
       _textController.text = '';
@@ -434,7 +508,7 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
       _textFocus.unfocus();
     });
 
-    // 3) Create on empty space
+    // 4) Create on empty space
     if (_tool == EditorTool.none) {
       return;
     }
@@ -511,7 +585,7 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     x = x.clamp(0.0, 1.0 - defaultW);
     y = y.clamp(0.0, 1.0 - defaultH);
 
-    final packed = _TextColorPack.pack(border: _textBorder, bg: _textBg, text: _textFg);
+    final packed = _TextColorPack.pack(border: _textBorder, bg: _textBg, text: _textFg, size: _textSize);
 
     final draft = _fitTextDraftToLabel(
       AnnotationDraft(
@@ -730,37 +804,65 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
 
     switch (mode) {
       case _DragMode.move:
-        d = d.copyWith(
-          x: (d.x + dx).clamp(0.0, 1.0 - d.w),
-          y: (d.y + dy).clamp(0.0, 1.0 - d.h),
-        );
+        if (d.isCircle) {
+          const circleOverflow = 0.075;
+          d = d.copyWith(
+            x: (d.x + dx).clamp(-circleOverflow, 1.0 - d.w + circleOverflow),
+            y: (d.y + dy).clamp(0.0, 1.0 - d.h),
+          );
+        } else {
+          d = d.copyWith(
+            x: (d.x + dx).clamp(0.0, 1.0 - d.w),
+            y: (d.y + dy).clamp(0.0, 1.0 - d.h),
+          );
+        }
         break;
 
       case _DragMode.resizeNW:
         final newX = (d.x + dx).clamp(0.0, d.x + d.w - 0.05);
         final newY = (d.y + dy).clamp(0.0, d.y + d.h - 0.05);
-        final newW = (d.x + d.w - newX).clamp(0.05, 1.0);
-        final newH = (d.y + d.h - newY).clamp(0.05, 1.0);
+        var newW = (d.x + d.w - newX).clamp(0.05, 1.0);
+        var newH = (d.y + d.h - newY).clamp(0.05, 1.0);
+        if (d.isCircle) {
+          final size = math.min(newW, newH);
+          newW = size;
+          newH = size;
+        }
         d = d.copyWith(x: newX, y: newY, w: newW, h: newH);
         break;
 
       case _DragMode.resizeNE:
         final newY = (d.y + dy).clamp(0.0, d.y + d.h - 0.05);
-        final newW = (d.w + dx).clamp(0.05, 1.0 - d.x);
-        final newH = (d.y + d.h - newY).clamp(0.05, 1.0);
+        var newW = (d.w + dx).clamp(0.05, 1.0 - d.x);
+        var newH = (d.y + d.h - newY).clamp(0.05, 1.0);
+        if (d.isCircle) {
+          final size = math.min(newW, newH);
+          newW = size;
+          newH = size;
+        }
         d = d.copyWith(y: newY, w: newW, h: newH);
         break;
 
       case _DragMode.resizeSW:
         final newX = (d.x + dx).clamp(0.0, d.x + d.w - 0.05);
-        final newW = (d.x + d.w - newX).clamp(0.05, 1.0);
-        final newH = (d.h + dy).clamp(0.05, 1.0 - d.y);
+        var newW = (d.x + d.w - newX).clamp(0.05, 1.0);
+        var newH = (d.h + dy).clamp(0.05, 1.0 - d.y);
+        if (d.isCircle) {
+          final size = math.min(newW, newH);
+          newW = size;
+          newH = size;
+        }
         d = d.copyWith(x: newX, w: newW, h: newH);
         break;
 
       case _DragMode.resizeSE:
-        final newW = (d.w + dx).clamp(0.05, 1.0 - d.x);
-        final newH = (d.h + dy).clamp(0.05, 1.0 - d.y);
+        var newW = (d.w + dx).clamp(0.05, 1.0 - d.x);
+        var newH = (d.h + dy).clamp(0.05, 1.0 - d.y);
+        if (d.isCircle) {
+          final size = math.min(newW, newH);
+          newW = size;
+          newH = size;
+        }
         d = d.copyWith(w: newW, h: newH);
         break;
 
@@ -787,6 +889,7 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
         _textBorder = t.border;
         _textBg = t.bg;
         _textFg = t.text;
+        _textSize = t.size;
         _textController.text = d.label ?? '';
         if (_tool == EditorTool.text) {
           _isEditingText = true;
@@ -983,13 +1086,42 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
       if (idx != null) {
         final d = _items[idx];
         if (d.isText) {
-          final packed = _TextColorPack.pack(border: _textBorder, bg: _textBg, text: _textFg);
+          final packed = _TextColorPack.pack(border: _textBorder, bg: _textBg, text: _textFg, size: _textSize);
           _items[idx] = d.copyWith(color: packed);
         }
       }
     });
   }
 
+
+  void _applyTextSize(int size) {
+    final idx = _selectedIndex;
+
+    setState(() {
+      _textSize = size.clamp(0, 2);
+
+      if (idx != null) {
+        final d = _items[idx];
+        if (d.isText) {
+          final packed = _TextColorPack.pack(
+            border: _textBorder,
+            bg: _textBg,
+            text: _textFg,
+            size: _textSize,
+          );
+
+          final currentLabel = _textController.text.trim().isEmpty
+              ? ((d.label?.trim().isNotEmpty ?? false) ? d.label!.trim() : 'Label')
+              : _textController.text.trim();
+
+          _items[idx] = _fitTextDraftToLabel(
+            d.copyWith(color: packed),
+            currentLabel,
+          );
+        }
+      }
+    });
+  }
 
   AnnotationDraft _fitTextDraftToLabel(AnnotationDraft d, String rawLabel) {
     final scene = _sceneSize;
@@ -998,27 +1130,31 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
       return d.copyWith(label: label);
     }
 
-    final maxWidthPx = scene.width * 0.42;
-    const minWidthPx = 72.0;
-    const minHeightPx = 44.0;
-    const padX = 18.0;
-    const padY = 12.0;
+    final textPack = _TextColorPack.unpack(d.color);
+    final fontSize = TextFontSizeOption.px(textPack.size);
+
+    final maxWidthPx = scene.width * 0.52;
+    final minWidthPx = math.max(72.0, fontSize * 2.8);
+    final minHeightPx = math.max(44.0, fontSize * 1.9);
+    final padX = math.max(18.0, fontSize * 0.9);
+    final padY = math.max(12.0, fontSize * 0.6);
 
     final tp = TextPainter(
       text: TextSpan(
         text: label,
-        style: const TextStyle(
-          fontSize: 15,
+        style: TextStyle(
+          fontSize: fontSize,
           fontWeight: FontWeight.w800,
+          height: 1.15,
         ),
       ),
       textAlign: TextAlign.center,
       textDirection: TextDirection.ltr,
-      maxLines: 5,
+      maxLines: 8,
     )..layout(maxWidth: maxWidthPx - padX * 2);
 
     final widthPx = (tp.width + padX * 2).clamp(minWidthPx, maxWidthPx);
-    final heightPx = (tp.height + padY * 2).clamp(minHeightPx, scene.height * 0.26);
+    final heightPx = (tp.height + padY * 2).clamp(minHeightPx, scene.height * 0.42);
 
     final newW = widthPx / scene.width;
     final newH = heightPx / scene.height;
@@ -1038,14 +1174,69 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     );
   }
 
+  void _resizeSelectedTextLive(String rawLabel) {
+    final idx = _selectedIndex;
+    if (idx == null) return;
+    final d = _items[idx];
+    if (!d.isText) return;
+
+    final trimmed = rawLabel.trim();
+    final fallback = (d.label?.trim().isNotEmpty ?? false) ? d.label!.trim() : 'Label';
+    final effectiveLabel = trimmed.isEmpty ? fallback : trimmed;
+
+    setState(() {
+      _items[idx] = _fitTextDraftToLabel(d, effectiveLabel);
+    });
+  }
+
   void _applyTextLabel() {
     final idx = _selectedIndex;
     if (idx == null) return;
     final d = _items[idx];
     if (!d.isText) return;
 
+    final trimmed = _textController.text.trim();
+    final fallback = (d.label?.trim().isNotEmpty ?? false) ? d.label!.trim() : 'Label';
+    final effectiveLabel = trimmed.isEmpty ? fallback : trimmed;
+
     setState(() {
-      _items[idx] = _fitTextDraftToLabel(d, _textController.text);
+      _items[idx] = _fitTextDraftToLabel(d, effectiveLabel);
+      _textController.text = effectiveLabel;
+      _textController.selection = TextSelection.collapsed(offset: effectiveLabel.length);
+    });
+  }
+
+  void _finishTextEditing() {
+    _applyTextLabel();
+    if (!mounted) return;
+    setState(() {
+      _isEditingText = false;
+    });
+    _textFocus.unfocus();
+  }
+
+  void _syncKeyboardImageOffset({
+    required double keyboardHeight,
+    required bool hideBottomPanel,
+  }) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_imageScrollController.hasClients) return;
+
+      if (hideBottomPanel && keyboardHeight > 0) {
+        final target = math.min(
+          keyboardHeight + 12,
+          _imageScrollController.position.maxScrollExtent,
+        );
+
+        if ((_lastKeyboardAdjustment - target).abs() > 1) {
+          _imageScrollController.jumpTo(target);
+          _lastKeyboardAdjustment = target;
+        }
+      } else if (_lastKeyboardAdjustment != 0) {
+        final target = math.min(0.0, _imageScrollController.position.maxScrollExtent);
+        _imageScrollController.jumpTo(target);
+        _lastKeyboardAdjustment = 0;
+      }
     });
   }
 
@@ -1056,168 +1247,211 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
   @override
   Widget build(BuildContext context) {
     final selected = _selected;
+    final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    final keyboardVisible = keyboardHeight > 0;
+    final hideBottomPanel = keyboardVisible && _isEditingText;
+
+    final double panelReserve = hideBottomPanel ? 0.0 : math.min(
+      MediaQuery.of(context).size.height * 0.32 + 24,
+      280,
+    );
+
+    final double imageBottomInset = hideBottomPanel ? 0.0 : panelReserve;
+
+    _syncKeyboardImageOffset(
+      keyboardHeight: keyboardHeight,
+      hideBottomPanel: hideBottomPanel,
+    );
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text('Edit Highlights'),
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                TextButton(
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    minimumSize: const Size(64, 36),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    visualDensity: VisualDensity.compact,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(64, 36),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: _save,
+                    child: const Text('Save'),
                   ),
-                  onPressed: _save,
-                  child: const Text('Save'),
-                ),
-                TextButton(
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    minimumSize: const Size(90, 36),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    visualDensity: VisualDensity.compact,
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(90, 36),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: _clearAll,
+                    child: const Text('Start over'),
                   ),
-                  onPressed: _clearAll,
-                  child: const Text('Start over'),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                child: Stack(
+                  children: [
+                    AnimatedPadding(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      padding: EdgeInsets.only(bottom: imageBottomInset),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: Colors.white.withOpacity(0.18), width: 1),
+                          ),
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final squareSize = constraints.maxWidth;
 
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Colors.white.withOpacity(0.18), width: 1),
-                  ),
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              final box = _sceneKey.currentContext?.findRenderObject() as RenderBox?;
-                              if (box != null) {
-                                final size = box.size;
-                                if (_sceneSize != size) {
-                                  setState(() => _sceneSize = size);
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                final box = _sceneKey.currentContext?.findRenderObject() as RenderBox?;
+                                if (box != null) {
+                                  final size = box.size;
+                                  if (_sceneSize != size) {
+                                    setState(() => _sceneSize = size);
+                                  }
                                 }
-                              }
-                            });
+                              });
 
-                            return Listener(
-                              onPointerDown: _onPointerDown,
-                              onPointerMove: _onPointerMove,
-                              onPointerUp: _onPointerUp,
-                              onPointerCancel: _onPointerCancel,
-                              child: Container(
-                                key: _sceneKey,
-                                color: Colors.black12,
-                                child: InteractiveViewer(
-                                  transformationController: _tx,
-                                  panEnabled: false,
-                                  scaleEnabled: false,
-                                  child: AspectRatio(
-                                    aspectRatio: 1.0,
-                                    child: Stack(
-                                      fit: StackFit.expand,
-                                      children: [
-                                        LayoutBuilder(
-                                          builder: (context, constraints) {
-                                            final s = constraints.biggest;
-                                            final m = Matrix4.identity()
-                                              ..translate(widget.framingTx * s.width,
-                                                  widget.framingTy * s.height)
-                                              ..scale(widget.framingScale);
-                                            return Transform(
-                                              alignment: Alignment.topLeft,
-                                              transform: m,
-                                              child: SizedBox.expand(
-                                                child: Image(
-                                                  image: widget.imageProvider,
-                                                  fit: BoxFit.cover,
+                              return SingleChildScrollView(
+                                controller: _imageScrollController,
+                                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
+                                physics: hideBottomPanel
+                                    ? const ClampingScrollPhysics()
+                                    : const NeverScrollableScrollPhysics(),
+                                padding: EdgeInsets.only(
+                                  bottom: hideBottomPanel ? keyboardHeight + 16 : 0,
+                                ),
+                                child: Center(
+                                  child: SizedBox(
+                                    width: squareSize,
+                                    height: squareSize,
+                                    child: Listener(
+                                      onPointerDown: _onPointerDown,
+                                      onPointerMove: _onPointerMove,
+                                      onPointerUp: _onPointerUp,
+                                      onPointerCancel: _onPointerCancel,
+                                      child: Container(
+                                        key: _sceneKey,
+                                        color: Colors.black12,
+                                        child: InteractiveViewer(
+                                          transformationController: _tx,
+                                          panEnabled: false,
+                                          scaleEnabled: false,
+                                          child: SizedBox(
+                                            width: squareSize,
+                                            height: squareSize,
+                                            child: Stack(
+                                              fit: StackFit.expand,
+                                              children: [
+                                                LayoutBuilder(
+                                                  builder: (context, constraints) {
+                                                    final s = constraints.biggest;
+                                                    final m = Matrix4.identity()
+                                                      ..translate(
+                                                        widget.framingTx * s.width,
+                                                        widget.framingTy * s.height,
+                                                      )
+                                                      ..scale(widget.framingScale);
+                                                    return Transform(
+                                                      alignment: Alignment.topLeft,
+                                                      transform: m,
+                                                      child: SizedBox.expand(
+                                                        child: Image(
+                                                          image: widget.imageProvider,
+                                                          fit: BoxFit.cover,
+                                                        ),
+                                                      ),
+                                                    );
+                                                  },
                                                 ),
-                                              ),
-                                            );
-                                          },
-                                        ),
-                                        for (int i = 0; i < _items.length; i++)
-                                          _ItemLayer(
-                                            draft: _items[i],
-                                            selected: i == _selectedIndex,
-                                            editingText: _isEditingText && i == _selectedIndex,
-                                            textController: _textController,
-                                            textFocus: _textFocus,
-                                            onTextCommitted: _applyTextLabel,
-                                            sceneSize: _sceneSize ?? constraints.biggest,
+                                                for (int i = 0; i < _items.length; i++)
+                                                  _ItemLayer(
+                                                    draft: _items[i],
+                                                    selected: i == _selectedIndex,
+                                                    editingText: _isEditingText && i == _selectedIndex,
+                                                    textController: _textController,
+                                                    textFocus: _textFocus,
+                                                    onTextChanged: _resizeSelectedTextLive,
+                                                    onTextCommitted: _finishTextEditing,
+                                                    sceneSize: _sceneSize ?? Size(squareSize, squareSize),
+                                                  ),
+                                              ],
+                                            ),
                                           ),
-                                      ],
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            );
-                          },
+                              );
+                            },
+                          ),
                         ),
                       ),
-
-                      const SizedBox(height: 14),
-
-                      // Palette
-                      SafeArea(
-                        top: false,
-                        child: _BottomPanel(
-                          expanded: _panelExpanded,
-                          onToggleExpanded: () => setState(() => _panelExpanded = !_panelExpanded),
-                          tool: _tool,
-                          onToolChanged: (t) {
-                            HapticFeedback.selectionClick();
-                            setState(() {
-                              _tool = t;
-                              _selectedIndex = null;
-                              _textController.text = '';
-                              _isEditingText = false;
-                              _textFocus.unfocus();
-                            });
-                          },
-                          selected: selected,
-                          shapeBorder: _shapeBorder,
-                          shapeFill: _shapeFill,
-                          arrowColor: _arrowColor,
-                          textBorder: _textBorder,
-                          textBg: _textBg,
-                          textFg: _textFg,
-                          textController: _textController,
-                          onShapeBorder: (c) => _applyShapeColors(border: c),
-                          onShapeFill: (c) => _applyShapeColors(fill: c),
-                          onArrowColor: (c) => _applyArrowColor(c),
-                          onTextBorder: (c) => _applyTextColors(border: c),
-                          onTextBg: (c) => _applyTextColors(bg: c),
-                          onTextFg: (c) => _applyTextColors(text: c),
-                          onApplyText: _applyTextLabel,
-                          onDeleteSelected: _deleteSelected,
+                    ),
+                    if (!hideBottomPanel)
+                      Align(
+                        alignment: Alignment.bottomCenter,
+                        child: SafeArea(
+                          top: false,
+                          child: _BottomPanel(
+                            expanded: _panelExpanded,
+                            onToggleExpanded: () => setState(() => _panelExpanded = !_panelExpanded),
+                            tool: _tool,
+                            onToolChanged: (t) {
+                              HapticFeedback.selectionClick();
+                              setState(() {
+                                _tool = t;
+                                _selectedIndex = null;
+                                _textController.text = '';
+                                _isEditingText = false;
+                                _textFocus.unfocus();
+                              });
+                            },
+                            selected: selected,
+                            shapeBorder: _shapeBorder,
+                            shapeFill: _shapeFill,
+                            arrowColor: _arrowColor,
+                            textBorder: _textBorder,
+                            textBg: _textBg,
+                            textFg: _textFg,
+                            textSize: _textSize,
+                            textController: _textController,
+                            onShapeBorder: (c) => _applyShapeColors(border: c),
+                            onShapeFill: (c) => _applyShapeColors(fill: c),
+                            onArrowColor: (c) => _applyArrowColor(c),
+                            onTextBorder: (c) => _applyTextColors(border: c),
+                            onTextBg: (c) => _applyTextColors(bg: c),
+                            onTextFg: (c) => _applyTextColors(text: c),
+                            onTextSize: _applyTextSize,
+                            onApplyText: _applyTextLabel,
+                            onDeleteSelected: _deleteSelected,
+                          ),
                         ),
                       ),
-                    ],
-                  ),
+                  ],
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1240,6 +1474,7 @@ class _BottomPanel extends StatelessWidget {
   final int textBorder;
   final int textBg;
   final int textFg;
+  final int textSize;
 
   final TextEditingController textController;
 
@@ -1249,6 +1484,7 @@ class _BottomPanel extends StatelessWidget {
   final ValueChanged<int> onTextBorder;
   final ValueChanged<int> onTextBg;
   final ValueChanged<int> onTextFg;
+  final ValueChanged<int> onTextSize;
 
   final VoidCallback onApplyText;
   final VoidCallback onDeleteSelected;
@@ -1265,6 +1501,7 @@ class _BottomPanel extends StatelessWidget {
     required this.textBorder,
     required this.textBg,
     required this.textFg,
+    required this.textSize,
     required this.textController,
     required this.onShapeBorder,
     required this.onShapeFill,
@@ -1272,6 +1509,7 @@ class _BottomPanel extends StatelessWidget {
     required this.onTextBorder,
     required this.onTextBg,
     required this.onTextFg,
+    required this.onTextSize,
     required this.onApplyText,
     required this.onDeleteSelected,
   });
@@ -1337,10 +1575,12 @@ class _BottomPanel extends StatelessWidget {
                                     border: textBorder,
                                     bg: textBg,
                                     fg: textFg,
+                                    size: textSize,
                                     controller: textController,
                                     onBorder: onTextBorder,
                                     onBg: onTextBg,
                                     onFg: onTextFg,
+                                    onSize: onTextSize,
                                     onApply: onApplyText,
                                   ),
 
@@ -1675,22 +1915,26 @@ class _TextProps extends StatelessWidget {
   final int border;
   final int bg;
   final int fg;
+  final int size;
 
   final TextEditingController controller;
 
   final ValueChanged<int> onBorder;
   final ValueChanged<int> onBg;
   final ValueChanged<int> onFg;
+  final ValueChanged<int> onSize;
   final VoidCallback onApply;
 
   const _TextProps({
     required this.border,
     required this.bg,
     required this.fg,
+    required this.size,
     required this.controller,
     required this.onBorder,
     required this.onBg,
     required this.onFg,
+    required this.onSize,
     required this.onApply,
   });
 
@@ -1706,6 +1950,121 @@ class _TextProps extends StatelessWidget {
         _ColorPickerRow(label: 'Background colour', value: bg, allowed: allowed, onChanged: onBg),
         const SizedBox(height: 10),
         _ColorPickerRow(label: 'Text colour', value: fg, allowed: allowed, onChanged: onFg),
+        const SizedBox(height: 10),
+        _FontSizePickerRow(
+          value: size,
+          onChanged: onSize,
+        ),
+      ],
+    );
+  }
+}
+
+class _FontSizePickerRow extends StatelessWidget {
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  const _FontSizePickerRow({
+    required this.value,
+    required this.onChanged,
+  });
+
+  Future<void> _showPicker(BuildContext context, Offset globalPos) async {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final size = overlay?.size ?? const Size(0, 0);
+
+    final selected = await showMenu<int>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(globalPos.dx, globalPos.dy, 1, 1),
+        Offset.zero & size,
+      ),
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      color: Theme.of(context).colorScheme.surface.withOpacity(0.98),
+      items: [
+        PopupMenuItem<int>(
+          value: TextFontSizeOption.small,
+          child: Text(
+            'Small',
+            style: TextStyle(
+              fontSize: TextFontSizeOption.px(TextFontSizeOption.small),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        PopupMenuItem<int>(
+          value: TextFontSizeOption.medium,
+          child: Text(
+            'Medium',
+            style: TextStyle(
+              fontSize: TextFontSizeOption.px(TextFontSizeOption.medium),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        PopupMenuItem<int>(
+          value: TextFontSizeOption.large,
+          child: Text(
+            'Large',
+            style: TextStyle(
+              fontSize: TextFontSizeOption.px(TextFontSizeOption.large),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    );
+
+    if (selected != null) onChanged(selected);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final current = value.clamp(0, 2);
+
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            'Font size',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ),
+        const SizedBox(width: 10),
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (d) => _showPicker(context, d.globalPosition),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Theme.of(context).dividerColor),
+              color: Theme.of(context).colorScheme.surface,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: Center(
+                    child: Text(
+                      'Tt',
+                      style: TextStyle(
+                        fontSize: TextFontSizeOption.px(current) * 0.72,
+                        fontWeight: FontWeight.w700,
+                        height: 1.0,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(Icons.expand_more, size: 18),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -1717,6 +2076,7 @@ class _ItemLayer extends StatelessWidget {
   final bool editingText;
   final TextEditingController textController;
   final FocusNode textFocus;
+  final ValueChanged<String> onTextChanged;
   final VoidCallback onTextCommitted;
   final Size sceneSize;
 
@@ -1726,6 +2086,7 @@ class _ItemLayer extends StatelessWidget {
     required this.editingText,
     required this.textController,
     required this.textFocus,
+    required this.onTextChanged,
     required this.onTextCommitted,
     required this.sceneSize,
   });
@@ -1739,12 +2100,14 @@ class _ItemLayer extends StatelessWidget {
     Color borderColor;
     Color bgColor;
     Color textColor = Colors.white;
+    double textFontSize = TextFontSizeOption.px(TextFontSizeOption.small);
 
     if (draft.isText) {
       final t = _TextColorPack.unpack(draft.color);
       borderColor = Palette.colorOf(t.border);
       bgColor = Palette.colorOf(t.bg);
       textColor = Palette.colorOf(t.text);
+      textFontSize = TextFontSizeOption.px(t.size);
     } else {
       final s = _ShapeColorPack.unpack(draft.color);
       borderColor = Palette.colorOf(s.border);
@@ -1774,22 +2137,29 @@ class _ItemLayer extends StatelessWidget {
               border: border,
               borderRadius: BorderRadius.circular(10),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             alignment: Alignment.center,
             child: TextField(
               controller: textController,
               focusNode: textFocus,
+              autofocus: true,
               textAlign: TextAlign.center,
+              cursorColor: textColor,
               style: TextStyle(
-                fontSize: 15,
+                fontSize: textFontSize,
                 fontWeight: FontWeight.w800,
+                height: 1.15,
                 color: textColor,
               ),
-              decoration: const InputDecoration(
-                isDense: true,
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.zero,
+              decoration: const InputDecoration.collapsed(
+                hintText: '',
               ),
+              textInputAction: TextInputAction.done,
+              minLines: 1,
+              maxLines: 8,
+              enableSuggestions: false,
+              autocorrect: false,
+              onChanged: onTextChanged,
               onSubmitted: (_) => onTextCommitted(),
               onEditingComplete: onTextCommitted,
             ),
@@ -1811,15 +2181,17 @@ class _ItemLayer extends StatelessWidget {
           alignment: Alignment.center,
           child: draft.isText
               ? Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Center(
               child: Text(
                 (draft.label ?? '').trim(),
                 textAlign: TextAlign.center,
+                maxLines: 8,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 15,
+                  fontSize: textFontSize,
                   fontWeight: FontWeight.w800,
+                  height: 1.15,
                   color: textColor,
                 ),
               ),
@@ -1830,8 +2202,7 @@ class _ItemLayer extends StatelessWidget {
       ),
     );
 
-    // Handles for rect + text only (circles stay clean)
-    if (!selected || draft.isCircle) return base;
+    if (!selected || draft.isText) return base;
 
     return Stack(
       children: [

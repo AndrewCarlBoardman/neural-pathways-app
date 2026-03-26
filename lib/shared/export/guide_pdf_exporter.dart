@@ -199,6 +199,25 @@ class _PdfStepBlock {
 
 const int _slot2SortOrderBase = 1000;
 
+class TextFontSizeOption {
+  static const int small = 0;
+  static const int medium = 1;
+  static const int large = 2;
+
+  static double px(int value, double side) {
+    final scale = side / 340.0;
+    switch (value) {
+      case large:
+        return 31.0 * scale;
+      case medium:
+        return 23.0 * scale;
+      case small:
+      default:
+        return 18.0 * scale;
+    }
+  }
+}
+
 List<StepAnnotation> _annsForSlot(List<StepAnnotation> all, int slot) {
   if (slot == 1) {
     final filtered =
@@ -239,14 +258,16 @@ Color _paletteColor(int idx) {
   );
 }
 
-({int border, int bg, int text}) _unpackTextColor(int packed) {
+({int border, int bg, int text, int size}) _unpackTextColor(int packed) {
   final border = packed % 10;
   final bg = (packed ~/ 10) % 10;
   final text = (packed ~/ 100) % 10;
+  final size = (packed ~/ 1000) % 10;
   return (
   border: border.clamp(0, 4),
   bg: bg.clamp(0, 4),
   text: text.clamp(0, 4),
+  size: size.clamp(0, 2),
   );
 }
 
@@ -339,24 +360,23 @@ TextPainter _fitTextPainter({
 }) {
   double fittedSize = baseSize;
 
-  if (singleWord) {
-    final natural = TextPainter(
-      text: TextSpan(
-        text: label,
-        style: TextStyle(
-          fontSize: baseSize,
-          fontWeight: FontWeight.w800,
-          color: textColor,
-        ),
+  final natural = TextPainter(
+    text: TextSpan(
+      text: label,
+      style: TextStyle(
+        fontSize: baseSize,
+        fontWeight: FontWeight.w800,
+        color: textColor,
+        height: 1.15,
       ),
-      textAlign: TextAlign.center,
-      textDirection: TextDirection.ltr,
-      maxLines: 1,
-    )..layout(minWidth: 0, maxWidth: 10000);
+    ),
+    textAlign: TextAlign.center,
+    textDirection: TextDirection.ltr,
+    maxLines: singleWord ? 1 : 8,
+  )..layout(minWidth: 0, maxWidth: 10000);
 
-    if (natural.width > maxWidth && natural.width > 0) {
-      fittedSize = (baseSize * (maxWidth / natural.width)).clamp(16.0, baseSize);
-    }
+  if (natural.width > maxWidth && natural.width > 0) {
+    fittedSize = (baseSize * (maxWidth / natural.width)).clamp(16.0, baseSize);
   }
 
   return TextPainter(
@@ -366,11 +386,13 @@ TextPainter _fitTextPainter({
         color: textColor,
         fontSize: fittedSize,
         fontWeight: FontWeight.w800,
+        height: 1.15,
       ),
     ),
     textDirection: TextDirection.ltr,
     textAlign: TextAlign.center,
-    maxLines: singleWord ? 1 : 5,
+    maxLines: singleWord ? 1 : 8,
+    ellipsis: singleWord ? null : '…',
   )..layout(maxWidth: maxWidth);
 }
 
@@ -449,11 +471,11 @@ void _drawAnnotations(
       ..isAntiAlias = true
       ..color = borderColor.withOpacity(0.95);
 
-    final padX = (side * 0.026).clamp(12.0, 18.0);
-    final padY = (side * 0.018).clamp(8.0, 12.0);
+    final baseSize = TextFontSizeOption.px(colors.size, side);
+    final padX = math.max(10.0, side * 0.029);
+    final padY = math.max(6.0, side * 0.0175);
     final isSingleWord = !label.contains(RegExp(r'\s'));
     final maxWidth = math.max(20.0, rect.width - (padX * 2));
-    final baseSize = (math.min(rect.width, rect.height) * 0.58).clamp(26.0, 42.0);
 
     final fitted = _fitTextPainter(
       label: label,
@@ -463,12 +485,7 @@ void _drawAnnotations(
       singleWord: isSingleWord,
     );
 
-    var boxHeight = math.max(rect.height, fitted.height + padY * 2);
-    var top = rect.center.dy - boxHeight / 2;
-    if (top < 0) top = 0;
-    if (top + boxHeight > side) top = side - boxHeight;
-
-    final boxRect = ui.Rect.fromLTWH(rect.left, top, rect.width, boxHeight);
+    final boxRect = rect;
     final rrect = ui.RRect.fromRectAndRadius(boxRect, radius);
 
     canvas.drawRRect(rrect, fillPaint);

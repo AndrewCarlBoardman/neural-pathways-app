@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -35,25 +34,47 @@ class CaregiverEntryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onLongPress: () => _enterCaregiverMode(context),
-      child: Column(
-        children: const [
-          Icon(
-            Icons.settings,
-            size: 28,
-            color: Colors.grey,
+    final theme = Theme.of(context);
+
+    return Center(
+      child: GestureDetector(
+        onLongPress: () => _enterCaregiverMode(context),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: theme.colorScheme.outlineVariant),
           ),
-          SizedBox(height: 4),
-          Text(
-            'Caregiver',
-            style: TextStyle(color: Colors.grey),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.settings_rounded,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Caregiver Mode',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    'Hold to enter',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-          Text(
-            'Hold',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
-          ),
-        ],
+        ),
       ),
     );
   }

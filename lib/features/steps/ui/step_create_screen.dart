@@ -847,24 +847,29 @@ class _TransformedImageFill extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final clampedScale = scale < 1.0 ? 1.0 : scale;
-        final minT = 1.0 - clampedScale;
-        final clampedTx = tx < minT ? minT : (tx > 0.0 ? 0.0 : tx);
-        final clampedTy = ty < minT ? minT : (ty > 0.0 ? 0.0 : ty);
-        final m = Matrix4.identity()
-          ..translate(
-            clampedTx * constraints.maxWidth,
-            clampedTy * constraints.maxHeight,
-          )
-          ..scale(clampedScale, clampedScale);
+        final width = constraints.maxWidth;
+        final height = constraints.maxHeight;
+
+        final matrix = Matrix4.identity()
+          ..translate(tx * width, ty * height)
+          ..scale(scale);
+
         return ClipRect(
           child: Transform(
-            transform: m,
-            child: Image.file(
-              file,
-              fit: BoxFit.cover,
-              width: constraints.maxWidth,
-              height: constraints.maxHeight,
+            alignment: Alignment.center,
+            transform: matrix,
+            child: SizedBox(
+              width: width,
+              height: height,
+              child: Image.file(
+                file,
+                fit: BoxFit.fill,
+                width: width,
+                height: height,
+                errorBuilder: (_, __, ___) => const Center(
+                  child: Text('Unable to load image'),
+                ),
+              ),
             ),
           ),
         );
@@ -872,6 +877,7 @@ class _TransformedImageFill extends StatelessWidget {
     );
   }
 }
+
 
 class _FrameAdjustScreen extends StatefulWidget {
   final _StepImageRef initial;

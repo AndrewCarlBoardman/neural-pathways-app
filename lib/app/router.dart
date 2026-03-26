@@ -5,17 +5,27 @@ import 'package:caregiver_guides/features/guides/ui/guide_create_screen.dart';
 import 'package:caregiver_guides/features/guides/ui/guide_detail_screen.dart';
 import 'package:caregiver_guides/features/guides/ui/guide_edit_screen.dart';
 import 'package:caregiver_guides/features/guides/ui/guides_list_screen.dart';
+import 'package:caregiver_guides/features/onboarding/ui/onboarding_screen.dart';
+import 'package:caregiver_guides/features/onboarding/ui/splash_screen.dart';
 import 'package:caregiver_guides/features/receiver/ui/receiver_guides_list_screen.dart';
 import 'package:caregiver_guides/features/receiver/ui/receiver_home_screen.dart';
-
-// Prefix these two to guarantee no symbol confusion
-import '../features/steps/ui/step_create_screen.dart' as step_create;
-import '../features/steps/ui/step_viewer_screen.dart' as step_viewer;
+import 'package:caregiver_guides/features/steps/ui/step_create_screen.dart'
+    as step_create;
+import 'package:caregiver_guides/features/steps/ui/step_viewer_screen.dart'
+    as step_viewer;
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
-    initialLocation: '/receiver',
+    initialLocation: '/splash',
     routes: [
+      GoRoute(
+        path: '/splash',
+        builder: (context, state) => const SplashScreen(),
+      ),
+      GoRoute(
+        path: '/onboarding',
+        builder: (context, state) => const OnboardingScreen(),
+      ),
       GoRoute(
         path: '/receiver',
         builder: (context, state) => const ReceiverHomeScreen(),

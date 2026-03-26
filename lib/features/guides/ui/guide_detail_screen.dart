@@ -238,8 +238,10 @@ class _GuideDetailScreenState extends ConsumerState<GuideDetailScreen> {
               guide.coverPhotoPath != null && guide.coverPhotoPath!.isNotEmpty;
           final coverFile = hasCover ? File(guide.coverPhotoPath!) : null;
 
+          final bottomInset = MediaQuery.of(context).padding.bottom;
+
           return ListView(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.fromLTRB(16, 16, 16, bottomInset + 156),
             children: [
               if (coverFile != null && coverFile.existsSync()) ...[
                 ClipRRect(
@@ -325,6 +327,7 @@ class _GuideDetailScreenState extends ConsumerState<GuideDetailScreen> {
                             final s = _localSteps[i];
                             return Card(
                               key: ValueKey('step_${s.id}'),
+                              margin: const EdgeInsets.only(bottom: 14),
                               child: ListTile(
                                 contentPadding: const EdgeInsets.symmetric(
                                   horizontal: 8,
