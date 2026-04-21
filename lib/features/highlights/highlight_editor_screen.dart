@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
+import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector3;
@@ -237,6 +238,8 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
   final ScrollController _imageScrollController = ScrollController();
   bool _isEditingText = false;
   double _lastKeyboardAdjustment = 0;
+  int _lastSelectedTextTapMs = 0;
+  int? _lastSelectedTextTapIndex;
 
   Size? _sceneSize;
   List<AnnotationDraft> _items = [];
@@ -255,11 +258,13 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
   int _textBorder = Palette.white;
   int _textBg = Palette.black;
   int _textFg = Palette.white;
-  int _textSize = TextFontSizeOption.small;
+  int _textSize = TextFontSizeOption.medium;
 
   // Pointer interaction state
   int? _activePointerId;
+  final Set<int> _downPointers = <int>{};
   Offset? _lastScenePoint;
+  Offset? _lastViewportPoint;
   _DragMode? _dragMode;
 
   int? _drawingIndex;
@@ -380,10 +385,10 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
 
   void _duplicateSelected() {
     final idx = _selectedIndex;
-    if (idx == null) return;
+    if (idx == null || _sceneSize == null) return;
     final d = _items[idx];
 
-    // Small offset so the duplicate is visible and easy to grab
+    // Small offset so the duplicate is visible and easy to grab.
     final nx = (d.x + 0.02).clamp(0.0, 1.0 - d.w);
     final ny = (d.y + 0.02).clamp(0.0, 1.0 - d.h);
 
@@ -397,6 +402,12 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     setState(() {
       _items.add(copy);
       _selectedIndex = _items.length - 1;
+      _dragMode = _DragMode.move;
+      _lastScenePoint = Offset(
+        (copy.x + copy.w / 2) * _sceneSize!.width,
+        (copy.y + copy.h / 2) * _sceneSize!.height,
+      );
+      _lastViewportPoint = null;
       if (copy.isText) {
         _textController.text = copy.label ?? '';
       }
@@ -444,25 +455,40 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
   // ----------------------------
 
   void _onPointerDown(PointerDownEvent event) {
+    _downPointers.add(event.pointer);
+
+    // Two-finger interaction is reserved for zoom/pan.
+    if (_downPointers.length > 1) {
+      _activePointerId = null;
+      _drawingIndex = null;
+      _drawStartScene = null;
+      _dragMode = null;
+      _lastScenePoint = null;
+      return;
+    }
+
     if (_activePointerId != null) return;
     _activePointerId = event.pointer;
 
     final scene = _globalToScene(event.position);
-    if (scene == null || _sceneSize == null) {
+    final viewport = _globalToViewport(event.position);
+    if (scene == null || viewport == null || _sceneSize == null) {
       _activePointerId = null;
       return;
     }
+    _lastViewportPoint = viewport;
 
     // 1) Hit existing => select + start move/resize/rotate
     for (int i = _items.length - 1; i >= 0; i--) {
       final d = _items[i];
       if (_hitTestItem(d, scene)) {
         final alreadySelected = _selectedIndex == i;
+        final hitMode = _hitTestHandleForItem(d, scene);
         _select(i);
 
-        // Text editing is a *second tap* action:
-        // 1st tap selects (so you can change colours).
-        // 2nd tap (while already selected) enters edit mode.
+        // Text boxes behave like floating objects first, editors second.
+        // Important: corner handles must win over "enter edit mode",
+        // otherwise resizing never works on text boxes.
         if (d.isText && alreadySelected && _isEditingText) {
           _applyTextLabel();
           _isEditingText = false;
@@ -474,20 +500,37 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
         } else if (d.isText &&
             alreadySelected &&
             !_isEditingText &&
+            hitMode == _DragMode.move &&
             (_tool == EditorTool.text || _tool == EditorTool.none)) {
           _isEditingText = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) _textFocus.requestFocus();
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            if (!mounted) return;
+            _textFocus.requestFocus();
+
+            void placeCaret() {
+              _textController.value = _textController.value.copyWith(
+                selection: TextSelection.collapsed(
+                  offset: _textController.text.length,
+                ),
+                composing: TextRange.empty,
+              );
+            }
+
+            placeCaret();
+            await Future<void>.delayed(const Duration(milliseconds: 40));
+            if (!mounted) return;
+            placeCaret();
           });
           _dragMode = null;
           _lastScenePoint = null;
           setState(() {});
           return;
         } else if (!alreadySelected && _isEditingText) {
+          _applyTextLabel();
           _isEditingText = false;
           _textFocus.unfocus();
         }
-        _dragMode = _hitTestHandleForItem(d, scene);
+        _dragMode = hitMode;
         _lastScenePoint = scene;
         setState(() {});
         return;
@@ -500,13 +543,25 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
       return;
     }
 
-    // 3) Empty space tap: deselect
+    // 3) Empty space tap / background drag
+    final canPanCanvas = _currentCanvasScale > 1.001;
+    final wantsToCreate = _tool != EditorTool.none;
+
     setState(() {
       _selectedIndex = null;
       _textController.text = '';
       _isEditingText = false;
       _textFocus.unfocus();
     });
+
+    // When a drawing tool is active, empty-space touch should still create
+    // even if the image is zoomed in.
+    if (!wantsToCreate && canPanCanvas) {
+      _dragMode = _DragMode.panCanvas;
+      _lastScenePoint = scene;
+      _lastViewportPoint = viewport;
+      return;
+    }
 
     // 4) Create on empty space
     if (_tool == EditorTool.none) {
@@ -522,9 +577,16 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
   }
 
   void _onPointerMove(PointerMoveEvent event) {
+    if (_downPointers.length > 1) return;
     if (_activePointerId != event.pointer) return;
     final scene = _globalToScene(event.position);
-    if (scene == null || _sceneSize == null) return;
+    final viewport = _globalToViewport(event.position);
+    if (scene == null || viewport == null || _sceneSize == null) return;
+
+    if (_dragMode == _DragMode.panCanvas) {
+      _updateCanvasPan(viewport);
+      return;
+    }
 
     // Drawing new item
     if (_drawingIndex != null && _drawStartScene != null) {
@@ -532,14 +594,15 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
       return;
     }
 
-    // Transform existing
-    if (_selectedIndex == null || _dragMode == null || _lastScenePoint == null) return;
+    if (_dragMode == null || _lastScenePoint == null) return;
     _updateTransform(scene);
   }
 
   void _onPointerUp(PointerUpEvent event) {
+    _downPointers.remove(event.pointer);
     if (_activePointerId != event.pointer) return;
     _activePointerId = null;
+    _lastViewportPoint = null;
 
     if (_drawingIndex != null) {
       final idx = _drawingIndex!;
@@ -559,8 +622,10 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
   }
 
   void _onPointerCancel(PointerCancelEvent event) {
+    _downPointers.remove(event.pointer);
     if (_activePointerId != event.pointer) return;
     _activePointerId = null;
+    _lastViewportPoint = null;
     _drawingIndex = null;
     _drawStartScene = null;
     _dragMode = null;
@@ -576,8 +641,8 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     final s = _sceneSize;
     if (s == null) return;
 
-    const defaultW = 0.26;
-    const defaultH = 0.11;
+    const defaultW = 0.28;
+    const defaultH = 0.12;
 
     double x = scenePoint.dx / s.width - defaultW / 2;
     double y = scenePoint.dy / s.height - defaultH / 2;
@@ -587,20 +652,17 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
 
     final packed = _TextColorPack.pack(border: _textBorder, bg: _textBg, text: _textFg, size: _textSize);
 
-    final draft = _fitTextDraftToLabel(
-      AnnotationDraft(
-        id: null,
-        kind: 1,
-        shapeType: null,
-        color: packed,
-        x: x,
-        y: y,
-        w: defaultW,
-        h: defaultH,
-        label: 'Label',
-        sortOrder: _items.length,
-      ),
-      'Label',
+    final draft = AnnotationDraft(
+      id: null,
+      kind: 1,
+      shapeType: null,
+      color: packed,
+      x: x,
+      y: y,
+      w: defaultW,
+      h: defaultH,
+      label: 'Label',
+      sortOrder: _items.length,
     );
 
     setState(() {
@@ -621,6 +683,7 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     final startY = (scenePoint.dy / s.height).clamp(0.0, 1.0);
 
     if (_tool == EditorTool.arrow) {
+      const defaultArrowLen = 0.10;
       final draft = AnnotationDraft(
         id: null,
         kind: 0,
@@ -628,8 +691,8 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
         color: _arrowColor,
         x: startX,
         y: startY,
-        w: 0.001,
-        h: 0.001,
+        w: defaultArrowLen.clamp(0.0, 1.0 - startX),
+        h: defaultArrowLen.clamp(0.0, 1.0 - startY) * 0.25,
         label: null,
         sortOrder: _items.length,
       );
@@ -646,15 +709,16 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     final shapeType = _tool == EditorTool.circle ? 1 : 0;
     final packed = _ShapeColorPack.pack(border: _shapeBorder, fill: _shapeFill);
 
+    final defaultShapeSize = _tool == EditorTool.circle ? 0.16 : 0.12;
     final draft = AnnotationDraft(
       id: null,
       kind: 0,
       shapeType: shapeType,
       color: packed,
-      x: startX,
-      y: startY,
-      w: 0.001,
-      h: 0.001,
+      x: (startX - defaultShapeSize / 2).clamp(0.0, 1.0 - defaultShapeSize),
+      y: (startY - defaultShapeSize / 2).clamp(0.0, 1.0 - defaultShapeSize),
+      w: defaultShapeSize,
+      h: defaultShapeSize,
       label: null,
       sortOrder: _items.length,
     );
@@ -673,7 +737,7 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     final idx = _drawingIndex!;
     final d = _items[idx];
 
-    const minSize = 0.03;
+    const minSize = 0.10;
 
     if (d.isArrow) {
       // tip is where touch started
@@ -729,12 +793,29 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
   // Move/resize/rotate
   // ----------------------------
 
+  void _updateCanvasPan(Offset viewportPoint) {
+    final lastViewport = _lastViewportPoint;
+    if (lastViewport == null) return;
+
+    const panSpeed = 1.0;
+    final dx = (viewportPoint.dx - lastViewport.dx) * panSpeed;
+    final dy = (viewportPoint.dy - lastViewport.dy) * panSpeed;
+
+    final next = Matrix4.fromList(_tx.value.storage)
+      ..translate(dx, dy);
+
+    setState(() {
+      _tx.value = _clampedCanvasMatrix(next);
+      _lastViewportPoint = viewportPoint;
+    });
+  }
+
   void _updateTransform(Offset scenePoint) {
     final s = _sceneSize!;
-    final idx = _selectedIndex!;
     final mode = _dragMode!;
     final last = _lastScenePoint!;
 
+    final idx = _selectedIndex!;
     var d = _items[idx];
 
     if (d.isArrow) {
@@ -803,67 +884,94 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     final dy = (scenePoint.dy - last.dy) / s.height;
 
     switch (mode) {
+      case _DragMode.panCanvas:
+        break;
+
       case _DragMode.move:
-        if (d.isCircle) {
-          const circleOverflow = 0.075;
-          d = d.copyWith(
-            x: (d.x + dx).clamp(-circleOverflow, 1.0 - d.w + circleOverflow),
-            y: (d.y + dy).clamp(0.0, 1.0 - d.h),
-          );
-        } else {
-          d = d.copyWith(
-            x: (d.x + dx).clamp(0.0, 1.0 - d.w),
-            y: (d.y + dy).clamp(0.0, 1.0 - d.h),
-          );
-        }
+        d = d.copyWith(
+          x: (d.x + dx).clamp(0.0, 1.0 - d.w),
+          y: (d.y + dy).clamp(0.0, 1.0 - d.h),
+        );
         break;
 
       case _DragMode.resizeNW:
-        final newX = (d.x + dx).clamp(0.0, d.x + d.w - 0.05);
-        final newY = (d.y + dy).clamp(0.0, d.y + d.h - 0.05);
-        var newW = (d.x + d.w - newX).clamp(0.05, 1.0);
-        var newH = (d.y + d.h - newY).clamp(0.05, 1.0);
         if (d.isCircle) {
-          final size = math.min(newW, newH);
-          newW = size;
-          newH = size;
+          const minSize = 0.06;
+          final anchorX = d.x + d.w;
+          final anchorY = d.y + d.h;
+          final pointerX = (d.x + dx).clamp(0.0, anchorX - minSize);
+          final pointerY = (d.y + dy).clamp(0.0, anchorY - minSize);
+          final sizeFromX = anchorX - pointerX;
+          final sizeFromY = anchorY - pointerY;
+          final size = math.max(minSize, math.max(sizeFromX, sizeFromY));
+          final newX = (anchorX - size).clamp(0.0, 1.0 - size);
+          final newY = (anchorY - size).clamp(0.0, 1.0 - size);
+          d = d.copyWith(x: newX, y: newY, w: size, h: size);
+        } else {
+          final newX = (d.x + dx).clamp(0.0, d.x + d.w - 0.05);
+          final newY = (d.y + dy).clamp(0.0, d.y + d.h - 0.05);
+          final newW = (d.x + d.w - newX).clamp(0.05, 1.0);
+          final newH = (d.y + d.h - newY).clamp(0.05, 1.0);
+          d = d.copyWith(x: newX, y: newY, w: newW, h: newH);
         }
-        d = d.copyWith(x: newX, y: newY, w: newW, h: newH);
         break;
 
       case _DragMode.resizeNE:
-        final newY = (d.y + dy).clamp(0.0, d.y + d.h - 0.05);
-        var newW = (d.w + dx).clamp(0.05, 1.0 - d.x);
-        var newH = (d.y + d.h - newY).clamp(0.05, 1.0);
         if (d.isCircle) {
-          final size = math.min(newW, newH);
-          newW = size;
-          newH = size;
+          const minSize = 0.06;
+          final anchorX = d.x;
+          final anchorY = d.y + d.h;
+          final pointerX = (d.x + d.w + dx).clamp(anchorX + minSize, 1.0);
+          final pointerY = (d.y + dy).clamp(0.0, anchorY - minSize);
+          final sizeFromX = pointerX - anchorX;
+          final sizeFromY = anchorY - pointerY;
+          final size = math.max(minSize, math.max(sizeFromX, sizeFromY));
+          final newY = (anchorY - size).clamp(0.0, 1.0 - size);
+          d = d.copyWith(x: anchorX, y: newY, w: size, h: size);
+        } else {
+          final newY = (d.y + dy).clamp(0.0, d.y + d.h - 0.05);
+          final newW = (d.w + dx).clamp(0.05, 1.0 - d.x);
+          final newH = (d.y + d.h - newY).clamp(0.05, 1.0);
+          d = d.copyWith(y: newY, w: newW, h: newH);
         }
-        d = d.copyWith(y: newY, w: newW, h: newH);
         break;
 
       case _DragMode.resizeSW:
-        final newX = (d.x + dx).clamp(0.0, d.x + d.w - 0.05);
-        var newW = (d.x + d.w - newX).clamp(0.05, 1.0);
-        var newH = (d.h + dy).clamp(0.05, 1.0 - d.y);
         if (d.isCircle) {
-          final size = math.min(newW, newH);
-          newW = size;
-          newH = size;
+          const minSize = 0.06;
+          final anchorX = d.x + d.w;
+          final anchorY = d.y;
+          final pointerX = (d.x + dx).clamp(0.0, anchorX - minSize);
+          final pointerY = (d.y + d.h + dy).clamp(anchorY + minSize, 1.0);
+          final sizeFromX = anchorX - pointerX;
+          final sizeFromY = pointerY - anchorY;
+          final size = math.max(minSize, math.max(sizeFromX, sizeFromY));
+          final newX = (anchorX - size).clamp(0.0, 1.0 - size);
+          d = d.copyWith(x: newX, y: anchorY, w: size, h: size);
+        } else {
+          final newX = (d.x + dx).clamp(0.0, d.x + d.w - 0.05);
+          final newW = (d.x + d.w - newX).clamp(0.05, 1.0);
+          final newH = (d.h + dy).clamp(0.05, 1.0 - d.y);
+          d = d.copyWith(x: newX, w: newW, h: newH);
         }
-        d = d.copyWith(x: newX, w: newW, h: newH);
         break;
 
       case _DragMode.resizeSE:
-        var newW = (d.w + dx).clamp(0.05, 1.0 - d.x);
-        var newH = (d.h + dy).clamp(0.05, 1.0 - d.y);
         if (d.isCircle) {
-          final size = math.min(newW, newH);
-          newW = size;
-          newH = size;
+          const minSize = 0.06;
+          final anchorX = d.x;
+          final anchorY = d.y;
+          final pointerX = (d.x + d.w + dx).clamp(anchorX + minSize, 1.0);
+          final pointerY = (d.y + d.h + dy).clamp(anchorY + minSize, 1.0);
+          final sizeFromX = pointerX - anchorX;
+          final sizeFromY = pointerY - anchorY;
+          final size = math.max(minSize, math.max(sizeFromX, sizeFromY));
+          d = d.copyWith(x: anchorX, y: anchorY, w: size, h: size);
+        } else {
+          final newW = (d.w + dx).clamp(0.05, 1.0 - d.x);
+          final newH = (d.h + dy).clamp(0.05, 1.0 - d.y);
+          d = d.copyWith(w: newW, h: newH);
         }
-        d = d.copyWith(w: newW, h: newH);
         break;
 
       case _DragMode.rotateHandle:
@@ -927,6 +1035,70 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     return Offset(v.x, v.y);
   }
 
+  Offset? _globalToViewport(Offset global) {
+    final box = _sceneKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return null;
+    return box.globalToLocal(global);
+  }
+
+  double get _currentCanvasScale => _tx.value.getMaxScaleOnAxis();
+
+  double get _zoomAwareHandleVisualSize {
+    final scale = _currentCanvasScale.clamp(1.0, 4.0);
+    return (18.0 / scale).clamp(8.0, 18.0);
+  }
+
+  double get _zoomAwareArrowHandleHitSize {
+    final scale = _currentCanvasScale.clamp(1.0, 4.0);
+    return (56.0 / scale).clamp(18.0, 56.0);
+  }
+
+  double get _zoomAwareArrowHandleVisualRadius {
+    final scale = _currentCanvasScale.clamp(1.0, 4.0);
+    return (10.0 / scale).clamp(5.0, 10.0);
+  }
+
+  double get _zoomAwareCornerHandleHitSize {
+    final scale = _currentCanvasScale.clamp(1.0, 4.0);
+    return (28.0 / scale).clamp(10.0, 22.0);
+  }
+
+  double get _zoomAwareMoveHitPadding {
+    final scale = _currentCanvasScale.clamp(1.0, 4.0);
+    return (22.0 / scale).clamp(8.0, 18.0);
+  }
+
+  String _limitLabelText(String raw) {
+    final trimmed = raw.trim();
+    final base = trimmed.isEmpty ? 'Label' : trimmed;
+    return base.characters.take(20).toString();
+  }
+
+  String _limitLiveLabelText(String raw) {
+    return raw.characters.take(20).toString();
+  }
+
+  Matrix4 _clampedCanvasMatrix(Matrix4 input) {
+    final scene = _sceneSize;
+    if (scene == null) return input;
+
+    final scale = input.getMaxScaleOnAxis().clamp(1.0, 4.0);
+    final scaledW = scene.width * scale;
+    final scaledH = scene.height * scale;
+
+    final minTx = scene.width - scaledW;
+    final maxTx = 0.0;
+    final minTy = scene.height - scaledH;
+    final maxTy = 0.0;
+
+    final tx = input.storage[12].clamp(minTx, maxTx);
+    final ty = input.storage[13].clamp(minTy, maxTy);
+
+    return Matrix4.identity()
+      ..translate(tx, ty)
+      ..scale(scale);
+  }
+
   Offset _sceneToRel({required Offset scenePoint, required Size size}) {
     return Offset(
       (scenePoint.dx / size.width).clamp(0.0, 1.0),
@@ -937,6 +1109,22 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
   Rect _relToSceneRect(AnnotationDraft d) {
     final s = _sceneSize!;
     return Rect.fromLTWH(d.x * s.width, d.y * s.height, d.w * s.width, d.h * s.height);
+  }
+
+  Rect _moveHitRectForItem(AnnotationDraft d) {
+    final r = _relToSceneRect(d);
+    final padding = _zoomAwareMoveHitPadding;
+    final minTarget = d.isText ? 60.0 : 46.0;
+
+    final extraX = math.max(padding, math.max(0.0, minTarget - r.width) / 2);
+    final extraY = math.max(padding, math.max(0.0, minTarget - r.height) / 2);
+
+    return Rect.fromLTRB(
+      r.left - extraX,
+      r.top - extraY,
+      r.right + extraX,
+      r.bottom + extraY,
+    );
   }
 
   bool _hitTestItem(AnnotationDraft d, Offset scene) {
@@ -951,12 +1139,13 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
       final dist = _distancePointToSegment(scene, tail, tip);
       if (dist <= 20) return true;
 
-      final handle = Rect.fromCenter(center: tail, width: 38, height: 38);
+      final handleSize = _zoomAwareArrowHandleHitSize;
+      final handle = Rect.fromCenter(center: tail, width: handleSize, height: handleSize);
       return handle.contains(scene);
     }
 
-    final r = _relToSceneRect(d);
-    return r.contains(scene);
+    final moveRect = _moveHitRectForItem(d);
+    return moveRect.contains(scene);
   }
 
   _DragMode _hitTestHandleForItem(AnnotationDraft d, Offset scene) {
@@ -965,17 +1154,21 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     if (d.isArrow) {
       final s = _sceneSize!;
       final tail = Offset((d.x + d.w) * s.width, (d.y + d.h) * s.height);
-      final handle = Rect.fromCenter(center: tail, width: 38, height: 38);
+      final handleSize = _zoomAwareArrowHandleHitSize;
+      final handle = Rect.fromCenter(center: tail, width: handleSize, height: handleSize);
       if (handle.contains(scene)) return _DragMode.rotateHandle;
       return _DragMode.move;
     }
 
     final r = _relToSceneRect(d);
-    const handle = 26.0;
-    final nw = Rect.fromLTWH(r.left - handle / 2, r.top - handle / 2, handle, handle);
-    final ne = Rect.fromLTWH(r.right - handle / 2, r.top - handle / 2, handle, handle);
-    final sw = Rect.fromLTWH(r.left - handle / 2, r.bottom - handle / 2, handle, handle);
-    final se = Rect.fromLTWH(r.right - handle / 2, r.bottom - handle / 2, handle, handle);
+    final handle = math.max(
+      _zoomAwareCornerHandleHitSize,
+      _zoomAwareHandleVisualSize + 4,
+    );
+    final nw = Rect.fromCenter(center: r.topLeft, width: handle, height: handle);
+    final ne = Rect.fromCenter(center: r.topRight, width: handle, height: handle);
+    final sw = Rect.fromCenter(center: r.bottomLeft, width: handle, height: handle);
+    final se = Rect.fromCenter(center: r.bottomRight, width: handle, height: handle);
 
     if (nw.contains(scene)) return _DragMode.resizeNW;
     if (ne.contains(scene)) return _DragMode.resizeNE;
@@ -1114,18 +1307,23 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
               ? ((d.label?.trim().isNotEmpty ?? false) ? d.label!.trim() : 'Label')
               : _textController.text.trim();
 
-          _items[idx] = _fitTextDraftToLabel(
-            d.copyWith(color: packed),
-            currentLabel,
+          _items[idx] = d.copyWith(
+            color: packed,
+            label: currentLabel,
           );
         }
       }
     });
   }
 
-  AnnotationDraft _fitTextDraftToLabel(AnnotationDraft d, String rawLabel) {
+  AnnotationDraft _fitTextDraftToLabel(
+      AnnotationDraft d,
+      String rawLabel, {
+        bool normalize = true,
+      }) {
     final scene = _sceneSize;
-    final label = rawLabel.trim().isEmpty ? 'Label' : rawLabel.trim();
+    final label = normalize ? _limitLabelText(rawLabel) : _limitLiveLabelText(rawLabel);
+    final measurementLabel = label.isEmpty ? 'Label' : label;
     if (scene == null) {
       return d.copyWith(label: label);
     }
@@ -1133,28 +1331,39 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     final textPack = _TextColorPack.unpack(d.color);
     final fontSize = TextFontSizeOption.px(textPack.size);
 
-    final maxWidthPx = scene.width * 0.52;
-    final minWidthPx = math.max(72.0, fontSize * 2.8);
-    final minHeightPx = math.max(44.0, fontSize * 1.9);
-    final padX = math.max(18.0, fontSize * 0.9);
-    final padY = math.max(12.0, fontSize * 0.6);
+    final maxWidthPx = scene.width * 0.58;
+    final minWidthPx = math.max(96.0, fontSize * 3.8);
+    final minHeightPx = math.max(60.0, fontSize * 2.9);
+    const padX = 16.0;
+    const padY = 14.0;
+    const textHeight = 1.12;
 
     final tp = TextPainter(
       text: TextSpan(
-        text: label,
+        text: measurementLabel,
         style: TextStyle(
           fontSize: fontSize,
           fontWeight: FontWeight.w800,
-          height: 1.15,
+          height: textHeight,
         ),
       ),
       textAlign: TextAlign.center,
       textDirection: TextDirection.ltr,
-      maxLines: 8,
+      maxLines: 2,
+      ellipsis: '…',
     )..layout(maxWidth: maxWidthPx - padX * 2);
 
-    final widthPx = (tp.width + padX * 2).clamp(minWidthPx, maxWidthPx);
-    final heightPx = (tp.height + padY * 2).clamp(minHeightPx, scene.height * 0.42);
+    final lineCount = tp.computeLineMetrics().length.clamp(1, 2);
+    final contentWidthPx = tp.size.width;
+    final contentHeightPx = math.max(
+      tp.height,
+      lineCount * fontSize * textHeight,
+    );
+
+    final widthPx = (contentWidthPx + padX * 2 + 8).clamp(minWidthPx, maxWidthPx);
+    final extraLineSafety = lineCount > 1 ? fontSize * 0.7 : fontSize * 0.25;
+    final heightPx = (contentHeightPx + padY * 2 + 12 + extraLineSafety)
+        .clamp(minHeightPx, scene.height * 0.46);
 
     final newW = widthPx / scene.width;
     final newH = heightPx / scene.height;
@@ -1180,13 +1389,9 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     final d = _items[idx];
     if (!d.isText) return;
 
-    final trimmed = rawLabel.trim();
-    final fallback = (d.label?.trim().isNotEmpty ?? false) ? d.label!.trim() : 'Label';
-    final effectiveLabel = trimmed.isEmpty ? fallback : trimmed;
-
-    setState(() {
-      _items[idx] = _fitTextDraftToLabel(d, effectiveLabel);
-    });
+    // Do not rewrite or normalize while typing. That breaks spaces and can
+    // cause characters to disappear mid-entry. Only refresh the counter.
+    setState(() {});
   }
 
   void _applyTextLabel() {
@@ -1196,13 +1401,18 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     if (!d.isText) return;
 
     final trimmed = _textController.text.trim();
-    final fallback = (d.label?.trim().isNotEmpty ?? false) ? d.label!.trim() : 'Label';
-    final effectiveLabel = trimmed.isEmpty ? fallback : trimmed;
+    final fallback =
+    (d.label?.trim().isNotEmpty ?? false) ? d.label!.trim() : 'Label';
+    final effectiveLabel = _limitLabelText(
+      trimmed.isEmpty ? fallback : trimmed,
+    );
 
     setState(() {
-      _items[idx] = _fitTextDraftToLabel(d, effectiveLabel);
+      _items[idx] = d.copyWith(label: effectiveLabel);
       _textController.text = effectiveLabel;
-      _textController.selection = TextSelection.collapsed(offset: effectiveLabel.length);
+      _textController.selection = TextSelection.collapsed(
+        offset: effectiveLabel.length,
+      );
     });
   }
 
@@ -1353,7 +1563,16 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
                                         child: InteractiveViewer(
                                           transformationController: _tx,
                                           panEnabled: false,
-                                          scaleEnabled: false,
+                                          scaleEnabled: true,
+                                          minScale: 1.0,
+                                          maxScale: 4.0,
+                                          clipBehavior: Clip.none,
+                                          boundaryMargin: EdgeInsets.zero,
+                                          onInteractionEnd: (_) {
+                                            _tx.value = _clampedCanvasMatrix(
+                                              Matrix4.fromList(_tx.value.storage),
+                                            );
+                                          },
                                           child: SizedBox(
                                             width: squareSize,
                                             height: squareSize,
@@ -1391,6 +1610,9 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
                                                     onTextChanged: _resizeSelectedTextLive,
                                                     onTextCommitted: _finishTextEditing,
                                                     sceneSize: _sceneSize ?? Size(squareSize, squareSize),
+                                                    canvasScale: _currentCanvasScale,
+                                                    handleVisualSize: _zoomAwareHandleVisualSize,
+                                                    arrowHandleRadius: _zoomAwareArrowHandleVisualRadius,
                                                   ),
                                               ],
                                             ),
@@ -1442,6 +1664,7 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
                             onTextFg: (c) => _applyTextColors(text: c),
                             onTextSize: _applyTextSize,
                             onApplyText: _applyTextLabel,
+                            onDuplicateSelected: _duplicateSelected,
                             onDeleteSelected: _deleteSelected,
                           ),
                         ),
@@ -1457,7 +1680,7 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
   }
 }
 
-enum _DragMode { move, resizeNW, resizeNE, resizeSW, resizeSE, rotateHandle }
+enum _DragMode { move, resizeNW, resizeNE, resizeSW, resizeSE, rotateHandle, panCanvas }
 
 class _BottomPanel extends StatelessWidget {
   final bool expanded;
@@ -1487,6 +1710,7 @@ class _BottomPanel extends StatelessWidget {
   final ValueChanged<int> onTextSize;
 
   final VoidCallback onApplyText;
+  final VoidCallback onDuplicateSelected;
   final VoidCallback onDeleteSelected;
 
   const _BottomPanel({
@@ -1511,6 +1735,7 @@ class _BottomPanel extends StatelessWidget {
     required this.onTextFg,
     required this.onTextSize,
     required this.onApplyText,
+    required this.onDuplicateSelected,
     required this.onDeleteSelected,
   });
 
@@ -1588,10 +1813,20 @@ class _BottomPanel extends StatelessWidget {
 
                                 Align(
                                   alignment: Alignment.centerRight,
-                                  child: IconButton(
-                                    onPressed: selected == null ? null : onDeleteSelected,
-                                    icon: const Icon(Icons.delete_outline),
-                                    tooltip: 'Delete selected',
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      IconButton(
+                                        onPressed: selected == null ? null : onDeleteSelected,
+                                        icon: const Icon(Icons.delete_outline),
+                                        tooltip: 'Delete selected',
+                                      ),
+                                      IconButton(
+                                        onPressed: selected == null ? null : onDuplicateSelected,
+                                        icon: const Icon(Icons.copy),
+                                        tooltip: 'Copy selected',
+                                      ),
+                                    ],
                                   ),
                                 ),
                                 const SizedBox(height: 4),
@@ -2079,6 +2314,9 @@ class _ItemLayer extends StatelessWidget {
   final ValueChanged<String> onTextChanged;
   final VoidCallback onTextCommitted;
   final Size sceneSize;
+  final double canvasScale;
+  final double handleVisualSize;
+  final double arrowHandleRadius;
 
   const _ItemLayer({
     required this.draft,
@@ -2089,12 +2327,19 @@ class _ItemLayer extends StatelessWidget {
     required this.onTextChanged,
     required this.onTextCommitted,
     required this.sceneSize,
+    required this.canvasScale,
+    required this.handleVisualSize,
+    required this.arrowHandleRadius,
   });
 
   @override
   Widget build(BuildContext context) {
     if (draft.isArrow) {
-      return _ArrowOverlay(draft: draft, selected: selected);
+      return _ArrowOverlay(
+        draft: draft,
+        selected: selected,
+        handleRadius: arrowHandleRadius,
+      );
     }
 
     Color borderColor;
@@ -2124,6 +2369,11 @@ class _ItemLayer extends StatelessWidget {
     final isCircle = draft.isCircle;
 
     final rect = _rectFromRel(draft);
+    const textPadX = 8.0;
+    const textPadY = 6.0;
+    const textLineHeight = 1.12;
+    final usableTextHeight = math.max(1.0, rect.height - (textPadY * 2));
+    final maxVisibleLines = math.max(1, (usableTextHeight / (textFontSize * textLineHeight)).floor());
 
     // In-place text editing when selected
     if (draft.isText && selected && editingText) {
@@ -2137,31 +2387,85 @@ class _ItemLayer extends StatelessWidget {
               border: border,
               borderRadius: BorderRadius.circular(10),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            alignment: Alignment.center,
-            child: TextField(
-              controller: textController,
-              focusNode: textFocus,
-              autofocus: true,
-              textAlign: TextAlign.center,
-              cursorColor: textColor,
-              style: TextStyle(
-                fontSize: textFontSize,
-                fontWeight: FontWeight.w800,
-                height: 1.15,
-                color: textColor,
-              ),
-              decoration: const InputDecoration.collapsed(
-                hintText: '',
-              ),
-              textInputAction: TextInputAction.done,
-              minLines: 1,
-              maxLines: 8,
-              enableSuggestions: false,
-              autocorrect: false,
-              onChanged: onTextChanged,
-              onSubmitted: (_) => onTextCommitted(),
-              onEditingComplete: onTextCommitted,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned.fill(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: textPadX, vertical: textPadY),
+                    child: Align(
+                      alignment: Alignment.center,
+                      child: TextField(
+                        controller: textController,
+                        focusNode: textFocus,
+                        autofocus: true,
+                        textAlign: TextAlign.center,
+                        textAlignVertical: TextAlignVertical.center,
+                        cursorColor: textColor,
+                        cursorWidth: 2,
+                        cursorHeight: textFontSize * 1.0,
+                        enableInteractiveSelection: true,
+                        keyboardType: TextInputType.multiline,
+                        style: TextStyle(
+                          fontSize: textFontSize,
+                          fontWeight: FontWeight.w800,
+                          height: 1.12,
+                          color: textColor,
+                        ),
+                        strutStyle: StrutStyle(
+                          fontSize: textFontSize,
+                          fontWeight: FontWeight.w800,
+                          height: 1.12,
+                          leading: 0,
+                          forceStrutHeight: true,
+                        ),
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          disabledBorder: InputBorder.none,
+                          isCollapsed: true,
+                          isDense: true,
+                          contentPadding: EdgeInsets.zero,
+                          counterText: '',
+                          filled: false,
+                          hintText: '',
+                        ),
+                        maxLength: 20,
+                        textInputAction: TextInputAction.done,
+                        minLines: 1,
+                        maxLines: maxVisibleLines,
+                        enableSuggestions: false,
+                        autocorrect: false,
+                        smartDashesType: SmartDashesType.disabled,
+                        smartQuotesType: SmartQuotesType.disabled,
+                        onChanged: onTextChanged,
+                        onSubmitted: (_) => onTextCommitted(),
+                        onEditingComplete: onTextCommitted,
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  right: 4,
+                  bottom: -18,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: bgColor.withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '${textController.text.characters.length.clamp(0, 20)}/20',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: textColor.withOpacity(0.75),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -2181,17 +2485,29 @@ class _ItemLayer extends StatelessWidget {
           alignment: Alignment.center,
           child: draft.isText
               ? Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: textPadX, vertical: textPadY),
             child: Center(
               child: Text(
                 (draft.label ?? '').trim(),
                 textAlign: TextAlign.center,
-                maxLines: 8,
+                maxLines: maxVisibleLines,
+                softWrap: true,
                 overflow: TextOverflow.ellipsis,
+                strutStyle: StrutStyle(
+                  fontSize: textFontSize,
+                  fontWeight: FontWeight.w800,
+                  height: 1.12,
+                  leading: 0,
+                  forceStrutHeight: true,
+                ),
+                textHeightBehavior: const TextHeightBehavior(
+                  applyHeightToFirstAscent: false,
+                  applyHeightToLastDescent: false,
+                ),
                 style: TextStyle(
                   fontSize: textFontSize,
                   fontWeight: FontWeight.w800,
-                  height: 1.15,
+                  height: 1.12,
                   color: textColor,
                 ),
               ),
@@ -2202,7 +2518,7 @@ class _ItemLayer extends StatelessWidget {
       ),
     );
 
-    if (!selected || draft.isText) return base;
+    if (!selected) return base;
 
     return Stack(
       children: [
@@ -2210,7 +2526,10 @@ class _ItemLayer extends StatelessWidget {
         Positioned.fromRect(
           rect: _rectFromRel(draft),
           child: IgnorePointer(
-            child: _CornerHandles(color: borderColor),
+            child: _CornerHandles(
+              color: borderColor,
+              handleSize: handleVisualSize,
+            ),
           ),
         ),
       ],
@@ -2225,11 +2544,15 @@ class _ItemLayer extends StatelessWidget {
 
 class _CornerHandles extends StatelessWidget {
   final Color color;
-  const _CornerHandles({required this.color});
+  final double handleSize;
+
+  const _CornerHandles({
+    required this.color,
+    required this.handleSize,
+  });
 
   @override
   Widget build(BuildContext context) {
-    const double handleSize = 14;
 
     Widget dot() {
       return Container(
@@ -2246,10 +2569,10 @@ class _CornerHandles extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        Positioned(left: 2, top: 2, child: dot()),
-        Positioned(right: 2, top: 2, child: dot()),
-        Positioned(left: 2, bottom: 2, child: dot()),
-        Positioned(right: 2, bottom: 2, child: dot()),
+        Positioned(left: 1, top: 1, child: dot()),
+        Positioned(right: 1, top: 1, child: dot()),
+        Positioned(left: 1, bottom: 1, child: dot()),
+        Positioned(right: 1, bottom: 1, child: dot()),
       ],
     );
   }
@@ -2258,10 +2581,12 @@ class _CornerHandles extends StatelessWidget {
 class _ArrowOverlay extends StatelessWidget {
   final AnnotationDraft draft;
   final bool selected;
+  final double handleRadius;
 
   const _ArrowOverlay({
     required this.draft,
     required this.selected,
+    required this.handleRadius,
   });
 
   @override
@@ -2277,6 +2602,7 @@ class _ArrowOverlay extends StatelessWidget {
           dy: draft.h,
           color: color,
           selected: selected,
+          handleRadius: handleRadius,
         ),
       ),
     );
@@ -2290,6 +2616,7 @@ class _ArrowPainter extends CustomPainter {
   final double dy;
   final Color color;
   final bool selected;
+  final double handleRadius;
 
   _ArrowPainter({
     required this.x,
@@ -2298,6 +2625,7 @@ class _ArrowPainter extends CustomPainter {
     required this.dy,
     required this.color,
     required this.selected,
+    required this.handleRadius,
   });
 
   @override
@@ -2347,8 +2675,8 @@ class _ArrowPainter extends CustomPainter {
         ..strokeWidth = 2
         ..style = PaintingStyle.stroke;
 
-      canvas.drawCircle(tail, 10, grabPaint);
-      canvas.drawCircle(tail, 10, border);
+      canvas.drawCircle(tail, handleRadius, grabPaint);
+      canvas.drawCircle(tail, handleRadius, border);
     }
   }
 
@@ -2359,6 +2687,7 @@ class _ArrowPainter extends CustomPainter {
         dx != oldDelegate.dx ||
         dy != oldDelegate.dy ||
         color != oldDelegate.color ||
-        selected != oldDelegate.selected;
+        selected != oldDelegate.selected ||
+        handleRadius != oldDelegate.handleRadius;
   }
 }

@@ -14,6 +14,7 @@ import '../../../shared/db/app_db.dart';
 import '../../../shared/db/db_provider.dart';
 import '../../highlights/highlight_editor_screen.dart';
 import '../../highlights/highlight_overlay.dart';
+import 'custom_camera_screen.dart';
 
 const int _slot2SortOrderBase = 1000;
 const double _frameAspectRatio = 1.0;
@@ -130,6 +131,7 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
   final _instruction2Controller = TextEditingController();
 
   bool _loading = true;
+  bool _saving = false;
   bool _twoImages = false;
   _StepImageRef? _img1;
   _StepImageRef? _img2;
@@ -160,6 +162,16 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
   }
 
   Future<void> _pickOrCaptureForSlot(int slot) async {
+    final previous = slot == 1 ? _img1 : _img2;
+
+    setState(() {
+      if (slot == 1) {
+        _img1 = null;
+      } else {
+        _img2 = null;
+      }
+    });
+
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       showDragHandle: true,
@@ -184,11 +196,58 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
         );
       },
     );
-    if (source == null) return;
 
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(source: source, imageQuality: 92);
-    if (picked == null) return;
+    if (source == null) {
+      setState(() {
+        if (slot == 1) {
+          _img1 = previous;
+        } else {
+          _img2 = previous;
+        }
+      });
+      return;
+    }
+
+    XFile? picked;
+
+    if (source == ImageSource.camera) {
+      final file = await Navigator.push<File>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const CustomCameraScreen(),
+        ),
+      );
+
+      if (file == null) {
+        setState(() {
+          if (slot == 1) {
+            _img1 = previous;
+          } else {
+            _img2 = previous;
+          }
+        });
+        return;
+      }
+
+      picked = XFile(file.path);
+    } else {
+      final picker = ImagePicker();
+      picked = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 92,
+      );
+
+      if (picked == null) {
+        setState(() {
+          if (slot == 1) {
+            _img1 = previous;
+          } else {
+            _img2 = previous;
+          }
+        });
+        return;
+      }
+    }
 
     final initial = _StepImageRef(path: picked.path);
     final adjusted = await Navigator.of(context).push<_StepImageRef>(
@@ -198,15 +257,49 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
       ),
     );
 
-    if (adjusted == null) return;
+    if (adjusted != null) {
+      await _clearHighlightsForSlot(slot);
+    }
 
     setState(() {
       if (slot == 1) {
-        _img1 = adjusted;
+        _img1 = adjusted ?? previous;
       } else {
-        _img2 = adjusted;
+        _img2 = adjusted ?? previous;
       }
     });
+  }
+
+  Future<void> _clearHighlightsForSlot(int slot) async {
+    final stepId = widget.stepId;
+    if (stepId == null) return;
+
+    final db = ref.read(dbProvider);
+    final all = await db.getAnnotationsForStep(stepId);
+
+    final keep = slot == 1
+        ? all.where((a) => a.sortOrder >= _slot2SortOrderBase).toList()
+        : all.where((a) => a.sortOrder < _slot2SortOrderBase).toList();
+
+    final rows = <StepAnnotationsCompanion>[];
+    for (final a in keep) {
+      rows.add(
+        StepAnnotationsCompanion(
+          stepId: Value(stepId),
+          kind: Value(a.kind),
+          shapeType: Value(a.shapeType),
+          color: Value(a.color),
+          x: Value(a.x),
+          y: Value(a.y),
+          w: Value(a.w),
+          h: Value(a.h),
+          label: Value(a.label),
+          sortOrder: Value(a.sortOrder),
+        ),
+      );
+    }
+
+    await db.replaceAnnotationsForStep(stepId: stepId, rows: rows);
   }
 
   Future<void> _adjustExisting(int slot) async {
@@ -358,59 +451,68 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
 
-    final db = ref.read(dbProvider);
-    final instruction1 = _instruction1Controller.text.trim();
-    final instruction2 = _twoImages ? _instruction2Controller.text.trim() : '';
+    setState(() => _saving = true);
 
-    final img2 = _twoImages ? _img2 : null;
-    final payload = _StepImagesPayload(a: _img1, b: img2);
+    try {
+      final db = ref.read(dbProvider);
+      final instruction1 = _instruction1Controller.text.trim();
+      final instruction2 = _twoImages ? _instruction2Controller.text.trim() : '';
 
-    if (widget.stepId == null) {
-      final index = await db.nextStepIndexForGuide(widget.guideId);
-      await db.createStep(
-        guideId: widget.guideId,
-        stepIndex: index,
-        instructionText: instruction1,
-        instructionText2: instruction2.isEmpty ? null : instruction2,
-        photoPath: payload.toPhotoPathString(),
-      );
-    } else {
-      await db.updateStep(
-        stepId: widget.stepId!,
-        instructionText: instruction1,
-        instructionText2: instruction2.isEmpty ? null : instruction2,
-        photoPath: payload.toPhotoPathString(),
-      );
+      final img2 = _twoImages ? _img2 : null;
+      final payload = _StepImagesPayload(a: _img1, b: img2);
 
-      if (!_twoImages) {
-        final all = await db.getAnnotationsForStep(widget.stepId!);
-        final keep =
-        all.where((a) => a.sortOrder < _slot2SortOrderBase).toList();
-        final rows = <StepAnnotationsCompanion>[];
-        for (final a in keep) {
-          rows.add(
-            StepAnnotationsCompanion(
-              stepId: Value(widget.stepId!),
-              kind: Value(a.kind),
-              shapeType: Value(a.shapeType),
-              color: Value(a.color),
-              x: Value(a.x),
-              y: Value(a.y),
-              w: Value(a.w),
-              h: Value(a.h),
-              label: Value(a.label),
-              sortOrder: Value(a.sortOrder),
-            ),
-          );
+      if (widget.stepId == null) {
+        final index = await db.nextStepIndexForGuide(widget.guideId);
+        await db.createStep(
+          guideId: widget.guideId,
+          stepIndex: index,
+          instructionText: instruction1,
+          instructionText2: instruction2.isEmpty ? null : instruction2,
+          photoPath: payload.toPhotoPathString(),
+        );
+      } else {
+        await db.updateStep(
+          stepId: widget.stepId!,
+          instructionText: instruction1,
+          instructionText2: instruction2.isEmpty ? null : instruction2,
+          photoPath: payload.toPhotoPathString(),
+        );
+
+        if (!_twoImages) {
+          final all = await db.getAnnotationsForStep(widget.stepId!);
+          final keep =
+          all.where((a) => a.sortOrder < _slot2SortOrderBase).toList();
+          final rows = <StepAnnotationsCompanion>[];
+          for (final a in keep) {
+            rows.add(
+              StepAnnotationsCompanion(
+                stepId: Value(widget.stepId!),
+                kind: Value(a.kind),
+                shapeType: Value(a.shapeType),
+                color: Value(a.color),
+                x: Value(a.x),
+                y: Value(a.y),
+                w: Value(a.w),
+                h: Value(a.h),
+                label: Value(a.label),
+                sortOrder: Value(a.sortOrder),
+              ),
+            );
+          }
+          await db.replaceAnnotationsForStep(stepId: widget.stepId!, rows: rows);
         }
-        await db.replaceAnnotationsForStep(stepId: widget.stepId!, rows: rows);
+      }
+
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
       }
     }
-
-    if (!mounted) return;
-    Navigator.pop(context, true);
   }
 
   Future<void> _duplicateStep() async {
@@ -498,8 +600,6 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
                 _duplicateStep();
               } else if (value == 'delete') {
                 _deleteStep();
-              } else if (value == 'save') {
-                _save();
               }
             },
             itemBuilder: (context) => [
@@ -525,149 +625,181 @@ class _StepCreateScreenState extends ConsumerState<StepCreateScreen> {
                     ],
                   ),
                 ),
-              const PopupMenuItem<String>(
-                value: 'save',
-                child: Row(
-                  children: [
-                    Icon(Icons.check),
-                    SizedBox(width: 12),
-                    Text('Save'),
-                  ],
-                ),
-              ),
             ],
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Center(
-            child: SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: false, label: Text('1 image')),
-                ButtonSegment(value: true, label: Text('2 images')),
-              ],
-              selected: {_twoImages},
-              onSelectionChanged: (s) {
-                final v = s.first;
-                setState(() {
-                  _twoImages = v;
-                  if (!v) {
-                    _img2 = null;
-                    _instruction2Controller.clear();
-                  }
-                });
-              },
-            ),
-          ),
-          const SizedBox(height: 14),
-          Form(
-            key: _formKey,
-            child: annAsync.when(
-              data: (all) {
-                final anns1 = _annsForSlot(all, 1);
-                final anns2 = _annsForSlot(all, 2);
-
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _instructionField(
-                      controller: _instruction1Controller,
-                      label: 'Text for Image 1',
-                      hint: 'e.g. Press the red power button',
-                      requiredField: true,
+      body: SafeArea(
+        bottom: true,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(72, 36),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
                     ),
-                    const SizedBox(height: 12),
-                    _StepImageEditorTile(
-                      title: 'Image 1',
-                      image: _img1,
-                      annotations: anns1,
-                      onAddOrReplace: () => _pickOrCaptureForSlot(1),
-                      onAdjust: () => _adjustExisting(1),
-                      onHighlights:
-                      (_img1 == null) ? null : () => _openHighlightEditor(1),
+                    onPressed: () {
+                      setState(() {
+                        _twoImages = false;
+                        _img2 = null;
+                        _instruction2Controller.clear();
+                      });
+                    },
+                    child: Text(
+                      '1 image',
+                      style: TextStyle(
+                        fontWeight: !_twoImages ? FontWeight.w700 : FontWeight.w500,
+                      ),
                     ),
-                    if (_twoImages) ...[
-                      const SizedBox(height: 18),
-                      _instructionField(
-                        controller: _instruction2Controller,
-                        label: 'Text for Image 2',
-                        hint: 'e.g. Then press the green start button',
-                        requiredField: true,
+                  ),
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(78, 36),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _twoImages = true;
+                      });
+                    },
+                    child: Text(
+                      '2 images',
+                      style: TextStyle(
+                        fontWeight: _twoImages ? FontWeight.w700 : FontWeight.w500,
                       ),
-                      const SizedBox(height: 12),
-                      _StepImageEditorTile(
-                        title: 'Image 2',
-                        image: _img2,
-                        annotations: anns2,
-                        onAddOrReplace: () => _pickOrCaptureForSlot(2),
-                        onAdjust: () => _adjustExisting(2),
-                        onHighlights: (_img2 == null)
-                            ? null
-                            : () => _openHighlightEditor(2),
-                      ),
-                    ],
-                  ],
-                );
-              },
-              loading: () => const SizedBox(
-                height: 260,
-                child: Center(child: CircularProgressIndicator()),
+                    ),
+                  ),
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(64, 36),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: _saving ? null : _save,
+                    child: Text(_saving ? 'Saving...' : 'Save'),
+                  ),
+                ],
               ),
-              error: (_, __) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _instructionField(
-                      controller: _instruction1Controller,
-                      label: 'Text for Image 1',
-                      hint: 'e.g. Press the red power button',
-                      requiredField: true,
-                    ),
-                    const SizedBox(height: 12),
-                    _StepImageEditorTile(
-                      title: 'Image 1',
-                      image: _img1,
-                      annotations: const [],
-                      onAddOrReplace: () => _pickOrCaptureForSlot(1),
-                      onAdjust: () => _adjustExisting(1),
-                      onHighlights:
-                      (_img1 == null) ? null : () => _openHighlightEditor(1),
-                    ),
-                    if (_twoImages) ...[
-                      const SizedBox(height: 18),
+            ),
+            const SizedBox(height: 14),
+            Form(
+              key: _formKey,
+              child: annAsync.when(
+                data: (all) {
+                  final anns1 = _annsForSlot(all, 1);
+                  final anns2 = _annsForSlot(all, 2);
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
                       _instructionField(
-                        controller: _instruction2Controller,
-                        label: 'Text for Image 2',
-                        hint: 'e.g. Then press the green start button',
+                        controller: _instruction1Controller,
+                        label: 'Text for Image 1',
+                        hint: 'e.g. Press the red power button',
                         requiredField: true,
                       ),
                       const SizedBox(height: 12),
                       _StepImageEditorTile(
-                        title: 'Image 2',
-                        image: _img2,
-                        annotations: const [],
-                        onAddOrReplace: () => _pickOrCaptureForSlot(2),
-                        onAdjust: () => _adjustExisting(2),
-                        onHighlights: (_img2 == null)
-                            ? null
-                            : () => _openHighlightEditor(2),
+                        title: 'Image 1',
+                        image: _img1,
+                        annotations: anns1,
+                        onAddOrReplace: () async => _pickOrCaptureForSlot(1),
+                        onAdjust: () async => _adjustExisting(1),
+                        onHighlights:
+                        (_img1 == null) ? null : () => _openHighlightEditor(1),
                       ),
+                      if (_twoImages) ...[
+                        const SizedBox(height: 18),
+                        _instructionField(
+                          controller: _instruction2Controller,
+                          label: 'Text for Image 2',
+                          hint: 'e.g. Then press the green start button',
+                          requiredField: true,
+                        ),
+                        const SizedBox(height: 12),
+                        _StepImageEditorTile(
+                          title: 'Image 2',
+                          image: _img2,
+                          annotations: anns2,
+                          onAddOrReplace: () async => _pickOrCaptureForSlot(2),
+                          onAdjust: () async => _adjustExisting(2),
+                          onHighlights: (_img2 == null)
+                              ? null
+                              : () => _openHighlightEditor(2),
+                        ),
+                      ],
                     ],
-                  ],
-                );
-              },
+                  );
+                },
+                loading: () => const SizedBox(
+                  height: 260,
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                error: (_, __) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _instructionField(
+                        controller: _instruction1Controller,
+                        label: 'Text for Image 1',
+                        hint: 'e.g. Press the red power button',
+                        requiredField: true,
+                      ),
+                      const SizedBox(height: 12),
+                      _StepImageEditorTile(
+                        title: 'Image 1',
+                        image: _img1,
+                        annotations: const [],
+                        onAddOrReplace: () async => _pickOrCaptureForSlot(1),
+                        onAdjust: () async => _adjustExisting(1),
+                        onHighlights:
+                        (_img1 == null) ? null : () => _openHighlightEditor(1),
+                      ),
+                      if (_twoImages) ...[
+                        const SizedBox(height: 18),
+                        _instructionField(
+                          controller: _instruction2Controller,
+                          label: 'Text for Image 2',
+                          hint: 'e.g. Then press the green start button',
+                          requiredField: true,
+                        ),
+                        const SizedBox(height: 12),
+                        _StepImageEditorTile(
+                          title: 'Image 2',
+                          image: _img2,
+                          annotations: const [],
+                          onAddOrReplace: () async => _pickOrCaptureForSlot(2),
+                          onAdjust: () async => _adjustExisting(2),
+                          onHighlights: (_img2 == null)
+                              ? null
+                              : () => _openHighlightEditor(2),
+                        ),
+                      ],
+                    ],
+                  );
+                },
+              ),
             ),
-          ),
-          if (widget.stepId == null) ...[
-            const SizedBox(height: 12),
-            const Text(
-              'Tip: Save the step first to enable highlights.',
-              style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
-            ),
+            if (widget.stepId == null) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'Tip: Save the step first to enable highlights.',
+                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -684,8 +816,8 @@ class _StepImageEditorTile extends StatelessWidget {
   final String title;
   final _StepImageRef? image;
   final List<StepAnnotation> annotations;
-  final VoidCallback onAddOrReplace;
-  final VoidCallback onAdjust;
+  final Future<void> Function() onAddOrReplace;
+  final Future<void> Function() onAdjust;
   final VoidCallback? onHighlights;
 
   const _StepImageEditorTile({
@@ -707,13 +839,13 @@ class _StepImageEditorTile extends StatelessWidget {
         Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
         GestureDetector(
-          onTap: () {
+          onTap: () async {
             if (!hasImage) {
-              onAddOrReplace();
+              await onAddOrReplace();
               return;
             }
 
-            showModalBottomSheet<void>(
+            final action = await showModalBottomSheet<String>(
               context: context,
               showDragHandle: true,
               builder: (ctx) {
@@ -724,18 +856,12 @@ class _StepImageEditorTile extends StatelessWidget {
                       ListTile(
                         leading: const Icon(Icons.photo_camera_back_outlined),
                         title: const Text('Replace image'),
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          onAddOrReplace();
-                        },
+                        onTap: () => Navigator.pop(ctx, 'replace'),
                       ),
                       ListTile(
                         leading: const Icon(Icons.tune),
                         title: const Text('Adjust framing'),
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          onAdjust();
-                        },
+                        onTap: () => Navigator.pop(ctx, 'adjust'),
                       ),
                       const SizedBox(height: 8),
                     ],
@@ -743,6 +869,14 @@ class _StepImageEditorTile extends StatelessWidget {
                 );
               },
             );
+
+            if (!context.mounted) return;
+
+            if (action == 'replace') {
+              await onAddOrReplace();
+            } else if (action == 'adjust') {
+              await onAdjust();
+            }
           },
           child: _FramedImagePreview(
             image: image,
@@ -827,6 +961,7 @@ class _EmptyAddImageFrame extends StatelessWidget {
         ],
       ),
     );
+
   }
 }
 
@@ -863,6 +998,7 @@ class _TransformedImageFill extends StatelessWidget {
               height: height,
               child: Image.file(
                 file,
+                key: ValueKey('${file.path}_${file.lastModifiedSync().millisecondsSinceEpoch}'),
                 fit: BoxFit.fill,
                 width: width,
                 height: height,

@@ -1,4 +1,3 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:caregiver_guides/features/guides/ui/guide_create_screen.dart';
@@ -6,25 +5,22 @@ import 'package:caregiver_guides/features/guides/ui/guide_detail_screen.dart';
 import 'package:caregiver_guides/features/guides/ui/guide_edit_screen.dart';
 import 'package:caregiver_guides/features/guides/ui/guides_list_screen.dart';
 import 'package:caregiver_guides/features/onboarding/ui/onboarding_screen.dart';
-import 'package:caregiver_guides/features/onboarding/ui/splash_screen.dart';
 import 'package:caregiver_guides/features/receiver/ui/receiver_guides_list_screen.dart';
 import 'package:caregiver_guides/features/receiver/ui/receiver_home_screen.dart';
 import 'package:caregiver_guides/features/steps/ui/step_create_screen.dart'
-    as step_create;
+as step_create;
 import 'package:caregiver_guides/features/steps/ui/step_viewer_screen.dart'
-    as step_viewer;
+as step_viewer;
 
-final routerProvider = Provider<GoRouter>((ref) {
+GoRouter createAppRouter({required String initialLocation}) {
   return GoRouter(
-    initialLocation: '/splash',
+    initialLocation: initialLocation,
     routes: [
       GoRoute(
-        path: '/splash',
-        builder: (context, state) => const SplashScreen(),
-      ),
-      GoRoute(
         path: '/onboarding',
-        builder: (context, state) => const OnboardingScreen(),
+        builder: (context, state) => OnboardingScreen(
+          onGetStarted: () => context.go('/receiver'),
+        ),
       ),
       GoRoute(
         path: '/receiver',
@@ -94,4 +90,4 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
-});
+}

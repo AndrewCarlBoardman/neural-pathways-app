@@ -87,8 +87,10 @@ class _GuideEditScreenState extends ConsumerState<GuideEditScreen> {
         coverPhotoPath: newCoverPhotoPath ?? guide.coverPhotoPath,
       );
 
+      ref.invalidate(editGuideProvider(widget.guideId));
+
       if (!mounted) return;
-      context.go('/guides/${guide.id}');
+      context.pop();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
