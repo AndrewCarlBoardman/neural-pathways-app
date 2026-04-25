@@ -172,16 +172,28 @@ class _OverlayItem extends StatelessWidget {
         alignment: Alignment.center,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              label,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: fontSize,
-                fontWeight: FontWeight.w800,
-                color: textColor,
-              ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            maxLines: 3,
+            softWrap: true,
+            overflow: TextOverflow.ellipsis,
+            strutStyle: StrutStyle(
+              fontSize: fontSize,
+              fontWeight: FontWeight.w800,
+              height: 1.12,
+              leading: 0,
+              forceStrutHeight: true,
+            ),
+            textHeightBehavior: const TextHeightBehavior(
+              applyHeightToFirstAscent: false,
+              applyHeightToLastDescent: false,
+            ),
+            style: TextStyle(
+              fontSize: fontSize,
+              fontWeight: FontWeight.w800,
+              height: 1.12,
+              color: textColor,
             ),
           ),
         ),
@@ -221,8 +233,8 @@ class _ArrowPainter extends CustomPainter {
     );
   }
 
-  double _arrowStroke(double side) => (side * 0.0080).clamp(2.2, 3.2);
-  double _arrowHead(double side) => (side * 0.040).clamp(10.0, 16.0);
+  double _arrowStroke(double side) => 6.0;
+  double _arrowHead(double side) => 18.0;
 
   @override
   void paint(Canvas canvas, Size size) {

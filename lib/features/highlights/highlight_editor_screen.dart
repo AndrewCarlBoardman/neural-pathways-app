@@ -266,6 +266,10 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
   Offset? _lastScenePoint;
   Offset? _lastViewportPoint;
   _DragMode? _dragMode;
+  Offset? _pointerDownScenePoint;
+  int? _pointerDownSelectedIndex;
+  _DragMode? _pointerDownHitMode;
+  bool _pointerMovedEnough = false;
 
   int? _drawingIndex;
   Offset? _drawStartScene;
@@ -478,60 +482,43 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     }
     _lastViewportPoint = viewport;
 
-    // 1) Hit existing => select + start move/resize/rotate
+    // 1) Hit existing => select + start move/resize/rotate.
+    //
+    // Text boxes must behave like floating objects first. Starting text edit
+    // on pointer-down makes normal dragging feel impossible because the
+    // keyboard steals the gesture. So: pointer-down always starts a move or
+    // resize; a deliberate tap can enter text edit later on pointer-up.
     for (int i = _items.length - 1; i >= 0; i--) {
       final d = _items[i];
       if (_hitTestItem(d, scene)) {
         final alreadySelected = _selectedIndex == i;
-        final hitMode = _hitTestHandleForItem(d, scene);
-        _select(i);
 
-        // Text boxes behave like floating objects first, editors second.
-        // Important: corner handles must win over "enter edit mode",
-        // otherwise resizing never works on text boxes.
-        if (d.isText && alreadySelected && _isEditingText) {
-          _applyTextLabel();
-          _isEditingText = false;
-          _textFocus.unfocus();
-          _dragMode = null;
-          _lastScenePoint = null;
-          setState(() {});
-          return;
-        } else if (d.isText &&
-            alreadySelected &&
-            !_isEditingText &&
-            hitMode == _DragMode.move &&
-            (_tool == EditorTool.text || _tool == EditorTool.none)) {
-          _isEditingText = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) async {
-            if (!mounted) return;
-            _textFocus.requestFocus();
+        // Handles are only active once selected. This keeps first-touch on a
+        // text box nice and move-friendly, while still giving selected text
+        // boxes proper resize targets.
+        final hitMode = alreadySelected
+            ? _hitTestHandleForItem(d, scene)
+            : _DragMode.move;
 
-            void placeCaret() {
-              _textController.value = _textController.value.copyWith(
-                selection: TextSelection.collapsed(
-                  offset: _textController.text.length,
-                ),
-                composing: TextRange.empty,
-              );
-            }
-
-            placeCaret();
-            await Future<void>.delayed(const Duration(milliseconds: 40));
-            if (!mounted) return;
-            placeCaret();
-          });
-          _dragMode = null;
-          _lastScenePoint = null;
-          setState(() {});
-          return;
-        } else if (!alreadySelected && _isEditingText) {
+        if (!alreadySelected && _isEditingText) {
           _applyTextLabel();
           _isEditingText = false;
           _textFocus.unfocus();
         }
+
+        if (d.isText && _isEditingText) {
+          _applyTextLabel();
+          _isEditingText = false;
+          _textFocus.unfocus();
+        }
+
+        _select(i, enterTextEdit: false);
         _dragMode = hitMode;
         _lastScenePoint = scene;
+        _pointerDownScenePoint = scene;
+        _pointerDownSelectedIndex = i;
+        _pointerDownHitMode = hitMode;
+        _pointerMovedEnough = false;
         setState(() {});
         return;
       }
@@ -583,6 +570,11 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     final viewport = _globalToViewport(event.position);
     if (scene == null || viewport == null || _sceneSize == null) return;
 
+    final downScene = _pointerDownScenePoint;
+    if (downScene != null && (scene - downScene).distance > 6.0) {
+      _pointerMovedEnough = true;
+    }
+
     if (_dragMode == _DragMode.panCanvas) {
       _updateCanvasPan(viewport);
       return;
@@ -608,6 +600,10 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
       final idx = _drawingIndex!;
       _drawingIndex = null;
       _drawStartScene = null;
+      _pointerDownScenePoint = null;
+      _pointerDownSelectedIndex = null;
+      _pointerDownHitMode = null;
+      _pointerMovedEnough = false;
       setState(() {
         _selectedIndex = idx;
         // Require explicit re-select of a tool before placing again.
@@ -616,8 +612,27 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
       return;
     }
 
+    final tappedSelectedText =
+        !_pointerMovedEnough &&
+            _pointerDownSelectedIndex != null &&
+            _pointerDownSelectedIndex == _selectedIndex &&
+            _pointerDownHitMode == _DragMode.move &&
+            _selectedIndex != null &&
+            _items[_selectedIndex!].isText &&
+            (_tool == EditorTool.text || _tool == EditorTool.none);
+
     _dragMode = null;
     _lastScenePoint = null;
+    _pointerDownScenePoint = null;
+    _pointerDownSelectedIndex = null;
+    _pointerDownHitMode = null;
+    _pointerMovedEnough = false;
+
+    if (tappedSelectedText) {
+      _enterTextEditForSelected();
+      return;
+    }
+
     setState(() {});
   }
 
@@ -630,6 +645,10 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     _drawStartScene = null;
     _dragMode = null;
     _lastScenePoint = null;
+    _pointerDownScenePoint = null;
+    _pointerDownSelectedIndex = null;
+    _pointerDownHitMode = null;
+    _pointerMovedEnough = false;
     setState(() {});
   }
 
@@ -984,7 +1003,7 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     });
   }
 
-  void _select(int index) {
+  void _select(int index, {bool enterTextEdit = false}) {
     HapticFeedback.selectionClick();
     final d = _items[index];
 
@@ -999,13 +1018,8 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
         _textFg = t.text;
         _textSize = t.size;
         _textController.text = d.label ?? '';
-        if (_tool == EditorTool.text) {
-          _isEditingText = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) _textFocus.requestFocus();
-          });
-        } else {
-          _isEditingText = false;
+        _isEditingText = enterTextEdit;
+        if (!enterTextEdit) {
           _textFocus.unfocus();
         }
       } else if (d.isArrow) {
@@ -1017,6 +1031,35 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
         _shapeBorder = s.border;
         _shapeFill = s.fill;
       }
+    });
+  }
+
+  void _enterTextEditForSelected() {
+    final idx = _selectedIndex;
+    if (idx == null || !_items[idx].isText) return;
+
+    setState(() {
+      _isEditingText = true;
+      _textController.text = _items[idx].label ?? '';
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      _textFocus.requestFocus();
+
+      void placeCaret() {
+        _textController.value = _textController.value.copyWith(
+          selection: TextSelection.collapsed(
+            offset: _textController.text.length,
+          ),
+          composing: TextRange.empty,
+        );
+      }
+
+      placeCaret();
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      if (!mounted) return;
+      placeCaret();
     });
   }
 
@@ -1061,6 +1104,14 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
   double get _zoomAwareCornerHandleHitSize {
     final scale = _currentCanvasScale.clamp(1.0, 4.0);
     return (28.0 / scale).clamp(10.0, 22.0);
+  }
+
+  double get _zoomAwareTextCornerHandleHitSize {
+    final scale = _currentCanvasScale.clamp(1.0, 4.0);
+
+    // Text boxes need a bigger resize hit-zone than the tiny visible dots,
+    // but not so big that the whole text box turns into a resize target.
+    return (34.0 / scale).clamp(16.0, 28.0);
   }
 
   double get _zoomAwareMoveHitPadding {
@@ -1161,7 +1212,9 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     }
 
     final r = _relToSceneRect(d);
-    final handle = math.max(
+    final handle = d.isText
+        ? _zoomAwareTextCornerHandleHitSize
+        : math.max(
       _zoomAwareCornerHandleHitSize,
       _zoomAwareHandleVisualSize + 4,
     );
@@ -1425,30 +1478,14 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     _textFocus.unfocus();
   }
 
-  void _syncKeyboardImageOffset({
-    required double keyboardHeight,
-    required bool hideBottomPanel,
-  }) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_imageScrollController.hasClients) return;
-
-      if (hideBottomPanel && keyboardHeight > 0) {
-        final target = math.min(
-          keyboardHeight + 12,
-          _imageScrollController.position.maxScrollExtent,
-        );
-
-        if ((_lastKeyboardAdjustment - target).abs() > 1) {
-          _imageScrollController.jumpTo(target);
-          _lastKeyboardAdjustment = target;
-        }
-      } else if (_lastKeyboardAdjustment != 0) {
-        final target = math.min(0.0, _imageScrollController.position.maxScrollExtent);
-        _imageScrollController.jumpTo(target);
-        _lastKeyboardAdjustment = 0;
-      }
-    });
-  }
+  // Keep the image canvas stable when the keyboard opens.
+  //
+  // Earlier versions tried to compensate for the keyboard by making the image
+  // area scrollable and then force-jumping the scroll position after the frame.
+  // That technically kept the selected text visible, but on iOS it created a
+  // noticeable "bounce" as the keyboard animation and our manual jump fought
+  // each other. The smoother behaviour is to hide the bottom tool panel while
+  // editing text, but keep its reserved space below the image.
 
   // ----------------------------
   // UI
@@ -1461,94 +1498,87 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
     final keyboardVisible = keyboardHeight > 0;
     final hideBottomPanel = keyboardVisible && _isEditingText;
 
-    final double panelReserve = hideBottomPanel ? 0.0 : math.min(
+    // Keep the same reserved space below the image whether the bottom panel is
+    // visible or hidden. This stops the square image from resizing/jumping when
+    // the keyboard comes in.
+    final double panelReserve = math.min(
       MediaQuery.of(context).size.height * 0.32 + 24,
       280,
     );
 
-    final double imageBottomInset = hideBottomPanel ? 0.0 : panelReserve;
-
-    _syncKeyboardImageOffset(
-      keyboardHeight: keyboardHeight,
-      hideBottomPanel: hideBottomPanel,
-    );
+    final double imageBottomInset = panelReserve;
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text('Edit Highlights'),
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  TextButton(
-                    style: TextButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      minimumSize: const Size(64, 36),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    onPressed: _save,
-                    child: const Text('Save'),
-                  ),
-                  TextButton(
-                    style: TextButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      minimumSize: const Size(90, 36),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    onPressed: _clearAll,
-                    child: const Text('Start over'),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-                child: Stack(
+      body: MediaQuery.removeViewInsets(
+        context: context,
+        removeBottom: true,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    AnimatedPadding(
-                      duration: const Duration(milliseconds: 180),
-                      curve: Curves.easeOut,
-                      padding: EdgeInsets.only(bottom: imageBottomInset),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: Colors.white.withOpacity(0.18), width: 1),
-                          ),
-                          child: LayoutBuilder(
-                            builder: (context, constraints) {
-                              final squareSize = constraints.maxWidth;
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(64, 36),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      onPressed: _save,
+                      child: const Text('Save'),
+                    ),
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(90, 36),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      onPressed: _clearAll,
+                      child: const Text('Start over'),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                  child: Stack(
+                    children: [
+                      AnimatedPadding(
+                        duration: const Duration(milliseconds: 180),
+                        curve: Curves.easeOut,
+                        padding: EdgeInsets.only(bottom: imageBottomInset),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: Colors.white.withOpacity(0.18), width: 1),
+                            ),
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                final squareSize = constraints.maxWidth;
 
-                              WidgetsBinding.instance.addPostFrameCallback((_) {
-                                final box = _sceneKey.currentContext?.findRenderObject() as RenderBox?;
-                                if (box != null) {
-                                  final size = box.size;
-                                  if (_sceneSize != size) {
-                                    setState(() => _sceneSize = size);
+                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                  final box = _sceneKey.currentContext?.findRenderObject() as RenderBox?;
+                                  if (box != null) {
+                                    final size = box.size;
+                                    if (_sceneSize != size) {
+                                      setState(() => _sceneSize = size);
+                                    }
                                   }
-                                }
-                              });
+                                });
 
-                              return SingleChildScrollView(
-                                controller: _imageScrollController,
-                                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
-                                physics: hideBottomPanel
-                                    ? const ClampingScrollPhysics()
-                                    : const NeverScrollableScrollPhysics(),
-                                padding: EdgeInsets.only(
-                                  bottom: hideBottomPanel ? keyboardHeight + 16 : 0,
-                                ),
-                                child: Center(
+                                return Align(
+                                  alignment: Alignment.topCenter,
                                   child: SizedBox(
                                     width: squareSize,
                                     height: squareSize,
@@ -1621,59 +1651,59 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> with Tick
                                       ),
                                     ),
                                   ),
-                                ),
-                              );
-                            },
+                                );
+                              },
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    if (!hideBottomPanel)
-                      Align(
-                        alignment: Alignment.bottomCenter,
-                        child: SafeArea(
-                          top: false,
-                          child: _BottomPanel(
-                            expanded: _panelExpanded,
-                            onToggleExpanded: () => setState(() => _panelExpanded = !_panelExpanded),
-                            tool: _tool,
-                            onToolChanged: (t) {
-                              HapticFeedback.selectionClick();
-                              setState(() {
-                                _tool = t;
-                                _selectedIndex = null;
-                                _textController.text = '';
-                                _isEditingText = false;
-                                _textFocus.unfocus();
-                              });
-                            },
-                            selected: selected,
-                            shapeBorder: _shapeBorder,
-                            shapeFill: _shapeFill,
-                            arrowColor: _arrowColor,
-                            textBorder: _textBorder,
-                            textBg: _textBg,
-                            textFg: _textFg,
-                            textSize: _textSize,
-                            textController: _textController,
-                            onShapeBorder: (c) => _applyShapeColors(border: c),
-                            onShapeFill: (c) => _applyShapeColors(fill: c),
-                            onArrowColor: (c) => _applyArrowColor(c),
-                            onTextBorder: (c) => _applyTextColors(border: c),
-                            onTextBg: (c) => _applyTextColors(bg: c),
-                            onTextFg: (c) => _applyTextColors(text: c),
-                            onTextSize: _applyTextSize,
-                            onApplyText: _applyTextLabel,
-                            onDuplicateSelected: _duplicateSelected,
-                            onDeleteSelected: _deleteSelected,
+                      if (!hideBottomPanel)
+                        Align(
+                          alignment: Alignment.bottomCenter,
+                          child: SafeArea(
+                            top: false,
+                            child: _BottomPanel(
+                              expanded: _panelExpanded,
+                              onToggleExpanded: () => setState(() => _panelExpanded = !_panelExpanded),
+                              tool: _tool,
+                              onToolChanged: (t) {
+                                HapticFeedback.selectionClick();
+                                setState(() {
+                                  _tool = t;
+                                  _selectedIndex = null;
+                                  _textController.text = '';
+                                  _isEditingText = false;
+                                  _textFocus.unfocus();
+                                });
+                              },
+                              selected: selected,
+                              shapeBorder: _shapeBorder,
+                              shapeFill: _shapeFill,
+                              arrowColor: _arrowColor,
+                              textBorder: _textBorder,
+                              textBg: _textBg,
+                              textFg: _textFg,
+                              textSize: _textSize,
+                              textController: _textController,
+                              onShapeBorder: (c) => _applyShapeColors(border: c),
+                              onShapeFill: (c) => _applyShapeColors(fill: c),
+                              onArrowColor: (c) => _applyArrowColor(c),
+                              onTextBorder: (c) => _applyTextColors(border: c),
+                              onTextBg: (c) => _applyTextColors(bg: c),
+                              onTextFg: (c) => _applyTextColors(text: c),
+                              onTextSize: _applyTextSize,
+                              onApplyText: _applyTextLabel,
+                              onDuplicateSelected: _duplicateSelected,
+                              onDeleteSelected: _deleteSelected,
+                            ),
                           ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -2399,6 +2429,7 @@ class _ItemLayer extends StatelessWidget {
                         controller: textController,
                         focusNode: textFocus,
                         autofocus: true,
+                        scrollPadding: EdgeInsets.zero,
                         textAlign: TextAlign.center,
                         textAlignVertical: TextAlignVertical.center,
                         cursorColor: textColor,

@@ -205,15 +205,15 @@ class TextFontSizeOption {
   static const int large = 2;
 
   static double px(int value, double side) {
-    final scale = side / 340.0;
+    final scale = side / 320.0;
     switch (value) {
       case large:
-        return 31.0 * scale;
+        return 26.0 * scale;
       case medium:
-        return 23.0 * scale;
+        return 20.0 * scale;
       case small:
       default:
-        return 18.0 * scale;
+        return 15.0 * scale;
     }
   }
 }
@@ -276,9 +276,9 @@ ui.Rect _circleRect(ui.Rect rect) {
   return ui.Rect.fromCenter(center: rect.center, width: d, height: d);
 }
 
-double _shapeStroke(double side) => (side * 0.0105).clamp(6.0, 10.0);
-double _arrowStroke(double side) => (side * 0.0110).clamp(6.5, 11.0);
-double _arrowHead(double side) => (side * 0.046).clamp(20.0, 32.0);
+double _shapeStroke(double side) => 3.0 * (side / 320.0);
+double _arrowStroke(double side) => 6.0 * (side / 320.0);
+double _arrowHead(double side) => 18.0 * (side / 320.0);
 
 Future<Uint8List> _renderAnnotatedSquare({
   required File file,
@@ -358,25 +358,34 @@ TextPainter _fitTextPainter({
   required double maxWidth,
   required bool singleWord,
 }) {
+  // Match the Flutter preview renderer: normal phrases should WRAP inside
+  // the text box at the selected font size.
+  //
+  // The earlier PDF version measured the full label as one long line and
+  // shrank the font so it could fit horizontally. That is why the PDF text
+  // looked much smaller than the Edit Step / Guide View preview.
   double fittedSize = baseSize;
 
-  final natural = TextPainter(
-    text: TextSpan(
-      text: label,
-      style: TextStyle(
-        fontSize: baseSize,
-        fontWeight: FontWeight.w800,
-        color: textColor,
-        height: 1.15,
+  // Only shrink genuinely single-word labels, because they cannot wrap.
+  if (singleWord) {
+    final natural = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: TextStyle(
+          fontSize: baseSize,
+          fontWeight: FontWeight.w800,
+          color: textColor,
+          height: 1.12,
+        ),
       ),
-    ),
-    textAlign: TextAlign.center,
-    textDirection: TextDirection.ltr,
-    maxLines: singleWord ? 1 : 8,
-  )..layout(minWidth: 0, maxWidth: 10000);
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout(minWidth: 0, maxWidth: 10000);
 
-  if (natural.width > maxWidth && natural.width > 0) {
-    fittedSize = (baseSize * (maxWidth / natural.width)).clamp(16.0, baseSize);
+    if (natural.width > maxWidth && natural.width > 0) {
+      fittedSize = (baseSize * (maxWidth / natural.width)).clamp(16.0, baseSize);
+    }
   }
 
   return TextPainter(
@@ -386,23 +395,22 @@ TextPainter _fitTextPainter({
         color: textColor,
         fontSize: fittedSize,
         fontWeight: FontWeight.w800,
-        height: 1.15,
+        height: 1.12,
       ),
     ),
     textDirection: TextDirection.ltr,
     textAlign: TextAlign.center,
-    maxLines: singleWord ? 1 : 8,
+    maxLines: singleWord ? 1 : 3,
     ellipsis: singleWord ? null : '…',
   )..layout(maxWidth: maxWidth);
 }
-
 void _drawAnnotations(
     ui.Canvas canvas,
     double side,
     List<StepAnnotation> annotations,
     ) {
   final stroke = _shapeStroke(side);
-  final radius = ui.Radius.circular((side * 0.03).clamp(12.0, 16.0));
+  final radius = ui.Radius.circular(10.0 * (side / 320.0));
 
   for (final a in annotations) {
     if (a.kind == 0) {
@@ -472,8 +480,8 @@ void _drawAnnotations(
       ..color = borderColor.withOpacity(0.95);
 
     final baseSize = TextFontSizeOption.px(colors.size, side);
-    final padX = math.max(10.0, side * 0.029);
-    final padY = math.max(6.0, side * 0.0175);
+    final padX = 8.0 * (side / 320.0);
+    final padY = 0.0;
     final isSingleWord = !label.contains(RegExp(r'\s'));
     final maxWidth = math.max(20.0, rect.width - (padX * 2));
 
