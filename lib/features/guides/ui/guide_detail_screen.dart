@@ -184,9 +184,12 @@ class _GuideDetailScreenState extends ConsumerState<GuideDetailScreen> {
         title: const Text('Guide'),
         actions: [
           PopupMenuButton<String>(
-            onSelected: (value) {
+            onSelected: (value) async {
               if (value == 'edit') {
-                context.go('$basePath/edit');
+                final updated = await context.push<bool>('$basePath/edit');
+                if (updated == true && mounted) {
+                  ref.invalidate(guideProvider(widget.guideId));
+                }
               } else if (value == 'pdf') {
                 _exportPdf();
               }
@@ -263,7 +266,12 @@ class _GuideDetailScreenState extends ConsumerState<GuideDetailScreen> {
               ),
               const SizedBox(height: 10),
               OutlinedButton.icon(
-                onPressed: () => context.go('$basePath/edit'),
+                onPressed: () async {
+                  final updated = await context.push<bool>('$basePath/edit');
+                  if (updated == true && mounted) {
+                    ref.invalidate(guideProvider(widget.guideId));
+                  }
+                },
                 icon: const Icon(Icons.edit),
                 label: const Text('Edit Guide'),
               ),

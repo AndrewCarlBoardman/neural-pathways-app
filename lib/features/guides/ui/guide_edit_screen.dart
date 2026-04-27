@@ -90,7 +90,7 @@ class _GuideEditScreenState extends ConsumerState<GuideEditScreen> {
       ref.invalidate(editGuideProvider(widget.guideId));
 
       if (!mounted) return;
-      context.pop();
+      context.pop(true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

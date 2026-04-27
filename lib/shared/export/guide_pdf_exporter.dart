@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart' hide Image;
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -23,6 +24,13 @@ class GuidePdfExporter {
     final steps = await db.getStepsForGuide(guideId);
     final doc = pw.Document();
 
+    final logoBytes = (await rootBundle.load(
+      'assets/images/clearsteps_splash_icon.png',
+    ))
+        .buffer
+        .asUint8List();
+    final logoImage = pw.MemoryImage(logoBytes);
+
     doc.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a4,
@@ -30,6 +38,14 @@ class GuidePdfExporter {
         build: (_) => pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
+            pw.Center(
+              child: pw.Image(
+                logoImage,
+                height: 95,
+                fit: pw.BoxFit.contain,
+              ),
+            ),
+            pw.SizedBox(height: 22),
             pw.Text(
               guide.title,
               style: pw.TextStyle(
